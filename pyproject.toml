@@ -1,0 +1,21 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "incident-triage-mcp"
+version = "0.1.0"
+requires-python = ">=3.10"
+dependencies = [
+  "mcp[cli]>=1.26.0",
+  "pydantic>=2.5",
+]
+
+[project.scripts]
+incident-triage-mcp = "incident_triage_mcp.server:main"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
