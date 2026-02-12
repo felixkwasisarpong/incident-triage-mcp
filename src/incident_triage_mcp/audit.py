@@ -2,6 +2,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Dict, Optional
 from datetime import datetime, timezone
+from pathlib import Path
 import json
 import uuid
 
@@ -18,7 +19,9 @@ class AuditEvents:
 
 class AuditLog:
     def __init__(self, path: str = "audit.jsonl") -> None:
-        self.path = path
+        self.path = Path(path)
+        # Ensure the directory exists for absolute or nested paths.
+        self.path.parent.mkdir(parents=True, exist_ok=True)
 
     def write(
             self,
@@ -40,3 +43,4 @@ class AuditLog:
         )
         with open(self.path, "a", encoding="utf-8") as f:
             f.write(json.dumps(evt.__dict__,ensure_ascii=False) + "\n")
+        return corr
