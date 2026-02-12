@@ -1,16 +1,19 @@
 from __future__ import annotations
 from incident_triage_mcp.audit import AuditLog
 import os
+from pathlib import Path
+import json
 from mcp.server.fastmcp import FastMCP
 from incident_triage_mcp.adapters.datadog_mock import DatadogMock
 from incident_triage_mcp.adapters.runbooks_local import RunbooksLocal
+from incident_triage_mcp.adapters.airflow_api import AirflowAPI
 
 mcp = FastMCP("Incident Triage MCP", json_response=True)
 
 audit = AuditLog(path = os.getenv("AUDIT_PATH", "audit.jsonl"))
 datadog = DatadogMock()
 runbooks = RunbooksLocal()
-
+airflow = AirflowAPI(base_url=os.getenv("AIRFLOW_BASE_URL", "http://localhost:8080"))
 @mcp.tool()
 def alerts_fetch_active(services: list[str] = None, since_minutes: int = 30, max_alerts: int = 50) -> dict:
     services = services or []
@@ -44,6 +47,27 @@ def runbooks_search(query: str, limit: int = 5) -> dict:
 @mcp.tool()
 def ping(message: str = "hello") -> dict:
     return {"ok": True, "message": message}
+
+@mcp.tool()
+def airflow_trigger_incident_dag(incident_id: str, service: str) -> dict:
+    dag_id = "incident_evidence_v1"
+    conf = {"incident_id": incident_id, "service": service}
+    corr = audit.write("airflow.trigger_incident_dag", {"dag_id": dag_id, "conf": conf}, ok=True)
+
+    run = airflow.trigger_dag(dag_id, conf)
+    return {"correlation_id": corr, "dag_id": dag_id, "dag_run": run}
+
+@mcp.tool()
+def airflow_get_incident_artifact(incident_id: str) -> dict:
+    corr = audit.write("airflow.get_incident_artifact", {"incident_id": incident_id}, ok=True)
+
+    artifact_dir = Path(os.getenv("AIRFLOW_ARTIFACT_DIR", "/airflow_artifacts"))
+    path = artifact_dir / f"{incident_id}.json"
+    if not path.exists():
+        return {"correlation_id": corr, "found": False, "path": str(path)}
+
+    data = json.loads(path.read_text(encoding="utf-8"))
+    return {"correlation_id": corr, "found": True, "path": str(path), "artifact": data}
 
 def main() -> None:
     # stdio by default; for HTTP:
