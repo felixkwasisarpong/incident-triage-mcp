@@ -22,6 +22,7 @@ services:
       postgres:
         condition: service_healthy
     environment:
+      AIRFLOW__API__AUTH_BACKENDS: airflow.api.auth.backend.basic_auth
       AIRFLOW__CORE__EXECUTOR: LocalExecutor
       AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@postgres:5432/airflow
       AIRFLOW__CORE__LOAD_EXAMPLES: "false"
@@ -35,6 +36,7 @@ services:
       airflow-init:
         condition: service_completed_successfully
     environment:
+      AIRFLOW__API__AUTH_BACKENDS: airflow.api.auth.backend.basic_auth
       INCIDENT_ARTIFACT_DIR: /opt/airflow/dags/artifacts
       AIRFLOW__CORE__EXECUTOR: LocalExecutor
       AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@postgres:5432/airflow
@@ -77,6 +79,8 @@ services:
       MCP_HOST: 0.0.0.0
       MCP_PORT: "3333"
       AIRFLOW_BASE_URL: http://airflow-webserver:8080
+      AIRFLOW_USERNAME: admin
+      AIRFLOW_PASSWORD: admin
     volumes:
       - ./data:/data
       - ./airflow/artifacts:/airflow_artifacts
