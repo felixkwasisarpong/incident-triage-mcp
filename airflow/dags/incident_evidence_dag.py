@@ -3,9 +3,10 @@ from __future__ import annotations
 import json
 import os
 from datetime import datetime, timedelta, timezone
-
+from incident_evidence_v1 import search_runbooks
 from airflow import DAG
 from airflow.decorators import task
+from airflow.operators.python import get_current_context
 
 
 ARTIFACT_DIR = os.getenv("INCIDENT_ARTIFACT_DIR", "/opt/airflow/dags/artifacts")
@@ -24,17 +25,23 @@ with DAG(
 ) as dag:
 
     @task
-    def build_bundle(incident_id: str, service: str, window_minutes: int = 30) -> str:
+    def build_bundle(window_minutes: int = 30) -> str:
         """
         MVP evidence collector:
         - Uses local/demo data (no external creds)
         - Writes a single EvidenceBundle JSON to ARTIFACT_DIR/<incident_id>.json
         """
+        context = get_current_context()
+        conf = (context.get("dag_run") or {}).conf or {}
+        incident_id = conf.get("incident_id", "unknown_incident")
+        service = conf.get("service", "unknown_service")
+
         os.makedirs(ARTIFACT_DIR, exist_ok=True)
 
         end = datetime.now(timezone.utc)
         start = end - timedelta(minutes=window_minutes)
-
+        query = f"{service} 5xx latency timeout db"
+        runbook_hits = search_runbooks(query=query, limit=5)
         bundle = {
             "schema_version": "v1",
             "incident_id": incident_id,
@@ -58,10 +65,7 @@ with DAG(
                 {"key": "rps", "value": 2100, "unit": "rps"},
                 {"key": "top_endpoint", "value": "POST /checkout"},
             ],
-            "runbook_hits": [
-                {"doc_id": "rb_07", "title": "5xx spike checklist", "score": 0.72,
-                 "summary": "Check recent deploys, dependency health, and top failing endpoints; confirm feature flags."}
-            ],
+            "runbook_hits": runbook_hits,
             "hypotheses": [
                 "Recent deploy regression",
                 "Downstream dependency timeout",
@@ -84,3 +88,6 @@ with DAG(
             json.dump(bundle, f, ensure_ascii=False, indent=2)
 
         return path
+
+    # Create the task in the DAG.
+    build_bundle()

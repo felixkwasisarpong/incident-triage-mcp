@@ -41,6 +41,7 @@ services:
       AIRFLOW__CORE__EXECUTOR: LocalExecutor
       AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@postgres:5432/airflow
       AIRFLOW__CORE__LOAD_EXAMPLES: "false"
+      RUNBOOKS_DIR: /opt/airflow/runbooks
     ports:
       - "8080:8080"
     command: webserver
@@ -49,6 +50,7 @@ services:
       - ./airflow/logs:/opt/airflow/logs
       - ./airflow/plugins:/opt/airflow/plugins
       - ./airflow/artifacts:/opt/airflow/dags/artifacts
+      - ./runbooks:/opt/airflow/runbooks:ro
 
   airflow-scheduler:
     image: apache/airflow:2.9.0-python3.11
@@ -60,12 +62,14 @@ services:
       AIRFLOW__CORE__EXECUTOR: LocalExecutor
       AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@postgres:5432/airflow
       AIRFLOW__CORE__LOAD_EXAMPLES: "false"
+      RUNBOOKS_DIR: /opt/airflow/runbooks
     command: scheduler
     volumes:
       - ./airflow/dags:/opt/airflow/dags
       - ./airflow/logs:/opt/airflow/logs
       - ./airflow/plugins:/opt/airflow/plugins
       - ./airflow/artifacts:/opt/airflow/dags/artifacts
+      - ./runbooks:/opt/airflow/runbooks:ro
 
   incident-triage-mcp:
     build:
@@ -73,7 +77,8 @@ services:
       dockerfile: Dockerfile
     container_name: it_mcp
     environment:
-      AIRFLOW_ARTIFACT_DIR: /airflow_artifacts
+      AIRFLOW_ARTIFACT_DIR: /Users/Apple/Documents/Personal Projects/incident-triage-mcp/airflow/artifacts
+
       MCP_TRANSPORT: streamable-http
       AUDIT_PATH: /data/audit.jsonl
       MCP_HOST: 0.0.0.0
@@ -81,9 +86,11 @@ services:
       AIRFLOW_BASE_URL: http://airflow-webserver:8080
       AIRFLOW_USERNAME: admin
       AIRFLOW_PASSWORD: admin
+      RUNBOOKS_DIR: /runbooks
     volumes:
       - ./data:/data
       - ./airflow/artifacts:/airflow_artifacts
+      - ./runbooks:/runbooks:ro
     ports:
       - "3333:3333"
     depends_on:
