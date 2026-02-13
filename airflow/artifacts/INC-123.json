@@ -3,8 +3,8 @@
   "incident_id": "INC-123",
   "service": "payments-api",
   "time_window": {
-    "start_iso": "2026-02-13T03:43:13.475375+00:00",
-    "end_iso": "2026-02-13T04:13:13.475375+00:00"
+    "start_iso": "2026-02-13T20:24:57.434064+00:00",
+    "end_iso": "2026-02-13T20:54:57.434064+00:00"
   },
   "alerts": [
     {
@@ -13,7 +13,7 @@
       "service": "payments-api",
       "name": "5xx rate high",
       "status": "triggered",
-      "started_at_iso": "2026-02-13T04:07:13.475375+00:00",
+      "started_at_iso": "2026-02-13T20:48:57.434064+00:00",
       "priority": "P1",
       "signal": {
         "metric": "http.server.errors",
@@ -77,5 +77,5 @@
       "url": "https://example.local/logs?q=5xx"
     }
   ],
-  "generated_at_iso": "2026-02-13T04:13:13.477583+00:00"
+  "generated_at_iso": "2026-02-13T20:54:57.439106+00:00"
 }
