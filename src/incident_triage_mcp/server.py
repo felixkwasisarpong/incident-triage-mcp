@@ -10,8 +10,9 @@ from incident_triage_mcp.adapters.airflow_api import AirflowAPI
 from incident_triage_mcp.tools.incidents import triage_incident_run
 from incident_triage_mcp.tools.evidence import load_bundle
 from incident_triage_mcp.tools.runbooks import search_runbooks as search_local_runbooks
-mcp = FastMCP("Incident Triage MCP", json_response=True)
+from incident_triage_mcp.tools.waiter import wait_for
 
+mcp = FastMCP("Incident Triage MCP", json_response=True)
 audit = AuditLog(path = os.getenv("AUDIT_PATH", "audit.jsonl"))
 datadog = DatadogMock()
 runbooks = RunbooksLocal()
@@ -114,6 +115,23 @@ def runbooks_search(query: str, limit: int = 5) -> dict:
     corr = audit.write("runbooks.search", {"query": query, "limit": limit, "runbooks_dir": runbooks_dir}, ok=True)
     hits = search_local_runbooks(runbooks_dir, query, limit)
     return {"correlation_id": corr, "results": hits}
+
+
+@mcp.tool()
+def evidence_wait_for_bundle(incident_id: str, timeout_seconds: int = 30, poll_seconds: int = 2) -> dict:
+    corr = audit.write(
+        "evidence.wait_for_bundle",
+        {"incident_id": incident_id, "timeout_seconds": timeout_seconds, "poll_seconds": poll_seconds},
+        ok=True,
+    )
+
+    # reuse your existing evidence_get_bundle implementation
+    def _getter(iid: str) -> dict:
+        return evidence_get_bundle(iid)
+
+    out = wait_for(_getter, incident_id, timeout_seconds=timeout_seconds, poll_seconds=poll_seconds)
+    out["correlation_id"] = corr
+    return out
 
 if __name__ == "__main__":
     main()
