@@ -7,6 +7,8 @@ from mcp.server.fastmcp import FastMCP
 from incident_triage_mcp.adapters.datadog_mock import DatadogMock
 from incident_triage_mcp.adapters.runbooks_local import RunbooksLocal
 from incident_triage_mcp.adapters.airflow_api import AirflowAPI
+from incident_triage_mcp.tools.incidents import triage_incident_run
+from incident_triage_mcp.tools.evidence import load_bundle
 
 mcp = FastMCP("Incident Triage MCP", json_response=True)
 
@@ -14,6 +16,28 @@ audit = AuditLog(path = os.getenv("AUDIT_PATH", "audit.jsonl"))
 datadog = DatadogMock()
 runbooks = RunbooksLocal()
 airflow = AirflowAPI(base_url=os.getenv("AIRFLOW_BASE_URL", "http://localhost:8080"))
+
+
+@mcp.tool()
+def incident_triage_run(incident_id: str, service: str) -> dict:
+    """
+    One-call demo: alerts -> airflow evidence -> artifact -> summary.
+    """
+    corr = audit.write("incident.triage_run", {"incident_id": incident_id, "service": service}, ok=True)
+
+    result = triage_incident_run(
+        incident_id=incident_id,
+        service=service,
+        alerts_fetch_active=alerts_fetch_active,
+        airflow_trigger_incident_dag=airflow_trigger_incident_dag,
+        airflow_get_incident_artifact=airflow_get_incident_artifact,
+        # tickets_create=tickets_create,  # uncomment when you wire Jira mock tool
+    )
+
+    result["correlation_id"] = corr
+    return result
+
+
 @mcp.tool()
 def alerts_fetch_active(services: list[str] = None, since_minutes: int = 30, max_alerts: int = 50) -> dict:
     services = services or []
@@ -74,6 +98,16 @@ def main() -> None:
     # MCP_TRANSPORT=streamable-http python -m incident_triage_mcp.server
     transport = os.getenv("MCP_TRANSPORT", "stdio")
     mcp.run(transport=transport)
+
+
+@mcp.tool()
+def evidence_get_bundle(incident_id: str) -> dict:
+    artifact_dir = os.getenv("AIRFLOW_ARTIFACT_DIR", "/airflow_artifacts")
+    corr = audit.write("evidence.get_bundle", {"incident_id": incident_id, "artifact_dir": artifact_dir}, ok=True)
+    out = load_bundle(artifact_dir, incident_id)
+    out["correlation_id"] = corr
+    return out
+
 
 if __name__ == "__main__":
     main()

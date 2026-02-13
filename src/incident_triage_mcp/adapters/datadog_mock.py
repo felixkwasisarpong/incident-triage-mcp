@@ -6,7 +6,7 @@ import random
 
 class DatadogMock:
     def fetch_active_alerts(self, services: List[str], since_minutes: int, max_alerts: int) -> List[Dict[str, Any]]:
-        now = datetime.now(timezone)
+        now = datetime.now(timezone.utc)
         out = []
         for svc in services or ["payments-api"]:
             out.append({
