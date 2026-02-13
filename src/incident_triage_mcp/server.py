@@ -13,7 +13,7 @@ from incident_triage_mcp.tools.runbooks import search_runbooks as search_local_r
 from incident_triage_mcp.tools.waiter import wait_for
 
 mcp = FastMCP("Incident Triage MCP", json_response=True)
-audit = AuditLog(path = os.getenv("AUDIT_PATH", "audit.jsonl"))
+audit = AuditLog()
 datadog = DatadogMock()
 runbooks = RunbooksLocal()
 airflow = AirflowAPI(base_url=os.getenv("AIRFLOW_BASE_URL", "http://localhost:8080"))

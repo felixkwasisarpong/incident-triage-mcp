@@ -1,0 +1,54 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: incident-triage-mcp
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: incident-triage-mcp
+  template:
+    metadata:
+      labels:
+        app: incident-triage-mcp
+    spec:
+      containers:
+        - name: mcp
+          image: your-dockerhub-username/incident-triage-mcp:0.1.0
+          ports:
+            - containerPort: 3333
+          env:
+            - name: MCP_TRANSPORT
+              value: "streamable-http"
+            - name: MCP_HOST
+              value: "0.0.0.0"
+            - name: MCP_PORT
+              value: "3333"
+
+            - name: AUDIT_MODE
+              value: "stdout"
+
+            # If you keep Airflow external/in-cluster later:
+            - name: AIRFLOW_BASE_URL
+              value: "http://airflow-webserver:8080"
+            - name: AIRFLOW_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: airflow-creds
+                  key: username
+            - name: AIRFLOW_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: airflow-creds
+                  key: password
+
+          livenessProbe:
+            tcpSocket:
+              port: 3333
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          readinessProbe:
+            tcpSocket:
+              port: 3333
+            initialDelaySeconds: 5
+            periodSeconds: 5
