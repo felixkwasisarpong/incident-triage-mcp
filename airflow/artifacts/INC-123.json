@@ -1,0 +1,81 @@
+{
+  "schema_version": "v1",
+  "incident_id": "INC-123",
+  "service": "payments-api",
+  "time_window": {
+    "start_iso": "2026-02-13T03:43:13.475375+00:00",
+    "end_iso": "2026-02-13T04:13:13.475375+00:00"
+  },
+  "alerts": [
+    {
+      "alert_id": "mock_501",
+      "provider": "mock",
+      "service": "payments-api",
+      "name": "5xx rate high",
+      "status": "triggered",
+      "started_at_iso": "2026-02-13T04:07:13.475375+00:00",
+      "priority": "P1",
+      "signal": {
+        "metric": "http.server.errors",
+        "value": 0.12,
+        "threshold": 0.05
+      }
+    }
+  ],
+  "signals": [
+    {
+      "key": "error_rate",
+      "value": 0.12,
+      "unit": "ratio"
+    },
+    {
+      "key": "latency_p95_ms",
+      "value": 840,
+      "unit": "ms"
+    },
+    {
+      "key": "rps",
+      "value": 2100,
+      "unit": "rps"
+    },
+    {
+      "key": "top_endpoint",
+      "value": "POST /checkout"
+    }
+  ],
+  "runbook_hits": [
+    {
+      "doc_id": "5xx-spike-checklist",
+      "title": "5xx Spike Checklist",
+      "score": 0.632,
+      "summary": "# 5xx Spike Checklist  ## Symptoms - Elevated 5xx error rate - Increased latency p95 - Top failing endpoint(s)  ## Checks 1. Check recent deploys (last 30–60 minutes) 2. Check dependency health (DB, cache, downstream API"
+    },
+    {
+      "doc_id": "db-timeouts-mitigation",
+      "title": "DB Timeouts Mitigation",
+      "score": 0.528,
+      "summary": "# DB Timeouts Mitigation  ## Symptoms - DB timeout errors - Increased request latency - Connection pool saturation  ## Checks 1. Check DB CPU / connections / locks 2. Check application connection pool limits 3. Identify "
+    }
+  ],
+  "hypotheses": [
+    "Recent deploy regression",
+    "Downstream dependency timeout",
+    "DB connection pool saturation"
+  ],
+  "recommended_next_steps": [
+    "Confirm if a deploy happened in the last 30 minutes",
+    "Check dependency health and error budgets",
+    "Inspect logs for top failing endpoint"
+  ],
+  "links": [
+    {
+      "type": "dashboard",
+      "url": "https://example.local/dashboards/payments"
+    },
+    {
+      "type": "logs",
+      "url": "https://example.local/logs?q=5xx"
+    }
+  ],
+  "generated_at_iso": "2026-02-13T04:13:13.477583+00:00"
+}
