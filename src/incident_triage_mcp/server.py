@@ -12,7 +12,9 @@ from incident_triage_mcp.tools.evidence import load_bundle
 from incident_triage_mcp.tools.runbooks import search_runbooks as search_local_runbooks
 from incident_triage_mcp.tools.waiter import wait_for
 
-mcp = FastMCP("Incident Triage MCP", json_response=True)
+_mcp_host = os.getenv("MCP_HOST", "127.0.0.1")
+_mcp_port = int(os.getenv("MCP_PORT", "8000"))
+mcp = FastMCP("Incident Triage MCP", json_response=True, host=_mcp_host, port=_mcp_port)
 audit = AuditLog()
 datadog = DatadogMock()
 runbooks = RunbooksLocal()

@@ -57,7 +57,7 @@ class AuditLog:
         )
 
 
-        line = json.dump(evt.__dict__, ensure_ascii=False)
+        line = json.dumps(evt.__dict__, ensure_ascii=False)
 
 
         if self.mode == "file" and self._file_path is not None:

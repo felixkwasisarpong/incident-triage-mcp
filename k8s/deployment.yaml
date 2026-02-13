@@ -3,7 +3,7 @@ kind: Deployment
 metadata:
   name: incident-triage-mcp
 spec:
-  replicas: 2
+  replicas: 1
   selector:
     matchLabels:
       app: incident-triage-mcp
@@ -14,7 +14,9 @@ spec:
     spec:
       containers:
         - name: mcp
-          image: your-dockerhub-username/incident-triage-mcp:0.1.0
+          image: incident-triage-mcp:0.1.0
+          imagePullPolicy: IfNotPresent
+          imagePullPolicy: IfNotPresent
           ports:
             - containerPort: 3333
           env:
@@ -24,31 +26,21 @@ spec:
               value: "0.0.0.0"
             - name: MCP_PORT
               value: "3333"
-
             - name: AUDIT_MODE
               value: "stdout"
-
-            # If you keep Airflow external/in-cluster later:
             - name: AIRFLOW_BASE_URL
-              value: "http://airflow-webserver:8080"
+              value: "http://host.docker.internal:8080"
             - name: AIRFLOW_USERNAME
-              valueFrom:
-                secretKeyRef:
-                  name: airflow-creds
-                  key: username
+              value: "admin"
             - name: AIRFLOW_PASSWORD
-              valueFrom:
-                secretKeyRef:
-                  name: airflow-creds
-                  key: password
-
+              value: "admin"
+          readinessProbe:
+            tcpSocket:
+              port: 3333
+            initialDelaySeconds: 3
+            periodSeconds: 5
           livenessProbe:
             tcpSocket:
               port: 3333
             initialDelaySeconds: 10
             periodSeconds: 10
-          readinessProbe:
-            tcpSocket:
-              port: 3333
-            initialDelaySeconds: 5
-            periodSeconds: 5
