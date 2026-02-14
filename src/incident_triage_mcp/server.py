@@ -14,7 +14,7 @@ from incident_triage_mcp.tools.waiter import wait_for
 from incident_triage_mcp.adapters.artifacts_s3 import read_evidence_bundle
 from incident_triage_mcp.domain_models import EvidenceBundle
 from incident_triage_mcp.config import ConfigError,load_config
-
+from incident_triage_mcp.tools.triage import build_triage_summary
 
 
 
@@ -164,6 +164,29 @@ def evidence_get_bundle(incident_id: str) -> dict:
     # optional fs fallback if you still want it
     artifact_dir = os.getenv("AIRFLOW_ARTIFACT_DIR", "./airflow/artifacts")
     out = load_bundle(artifact_dir, incident_id)
+    out["correlation_id"] = corr
+    return out
+
+
+
+@mcp.tool()
+def incident_triage_summary(incident_id: str) -> dict:
+    """
+    Deterministic (non-LLM) summary of an incident from the Evidence Bundle.
+    Great for recruiter demos and for agent planning.
+    """
+    corr = audit.write("incident.triage_summary", {"incident_id": incident_id}, ok=True)
+
+    # Reuse your existing evidence getter (S3/MinIO)
+    evidence = evidence_get_bundle(incident_id)
+
+    if not evidence.get("found"):
+        evidence["correlation_id"] = corr
+        return evidence
+
+    bundle = evidence.get("bundle") or {}
+    uri = evidence.get("uri")
+    out = build_triage_summary(bundle, evidence_uri=uri)
     out["correlation_id"] = corr
     return out
 
