@@ -7,6 +7,7 @@ from incident_evidence_v1 import search_runbooks
 from airflow import DAG
 from airflow.decorators import task
 from airflow.operators.python import get_current_context
+import boto3
 
 
 ARTIFACT_DIR = os.getenv("INCIDENT_ARTIFACT_DIR", "/opt/airflow/dags/artifacts")
@@ -31,6 +32,13 @@ with DAG(
         - Uses local/demo data (no external creds)
         - Writes a single EvidenceBundle JSON to ARTIFACT_DIR/<incident_id>.json
         """
+
+        ARTIFACT_STORE = os.getenv("ARTIFACT_STORE", "fs").lower()
+        S3_ENDPOINT_URL = os.getenv("S3_ENDPOINT_URL")
+        S3_BUCKET = os.getenv("S3_BUCKET", "triage-artifacts")
+        S3_REGION = os.getenv("S3_REGION", "us-east-1")
+
+
         context = get_current_context()
         conf = (context.get("dag_run") or {}).conf or {}
         incident_id = conf.get("incident_id", "unknown_incident")
@@ -83,6 +91,23 @@ with DAG(
             "generated_at_iso": utc_now_iso(),
         }
 
+        
+        key = f"evidence/v1/{incident_id}.json"
+        payload = json.dumps(bundle, ensure_ascii=False, indent=2).encode("utf-8")
+
+        if ARTIFACT_STORE == "s3":
+            s3 = boto3.client(
+                "s3",
+                endpoint_url=S3_ENDPOINT_URL,
+                region_name=S3_REGION,
+            )
+            s3.put_object(
+                Bucket=S3_BUCKET,
+                Key=key,
+                Body=payload,
+                ContentType="application/json",
+            )
+            return f"s3://{S3_BUCKET}/{key}"
         path = os.path.join(ARTIFACT_DIR, f"{incident_id}.json")
         with open(path, "w", encoding="utf-8") as f:
             json.dump(bundle, f, ensure_ascii=False, indent=2)
