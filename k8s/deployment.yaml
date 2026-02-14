@@ -34,6 +34,21 @@ spec:
               value: "admin"
             - name: AIRFLOW_PASSWORD
               value: "admin"
+
+            - name: ARTIFACT_STORE
+              value: "s3"
+            - name: S3_ENDPOINT_URL
+              value: "http://host.docker.internal:9000"
+            - name: S3_BUCKET
+              value: "triage-artifacts"
+            - name: S3_REGION
+              value: "us-east-1"
+            - name: AWS_ACCESS_KEY_ID
+              value: "minioadmin"
+            - name: AWS_SECRET_ACCESS_KEY
+              value: "minioadmin"
+
+
           readinessProbe:
             tcpSocket:
               port: 3333

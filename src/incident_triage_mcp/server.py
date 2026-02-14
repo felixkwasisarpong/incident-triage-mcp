@@ -11,6 +11,17 @@ from incident_triage_mcp.tools.incidents import triage_incident_run
 from incident_triage_mcp.tools.evidence import load_bundle
 from incident_triage_mcp.tools.runbooks import search_runbooks as search_local_runbooks
 from incident_triage_mcp.tools.waiter import wait_for
+from incident_triage_mcp.adapters.artifacts_s3 import read_evidence_bundle
+from incident_triage_mcp.domain_models import EvidenceBundle
+from incident_triage_mcp.config import ConfigError,load_config
+
+
+
+
+try:
+    CFG = load_config()
+except ConfigError as e:
+    raise SystemExit(f"[config] {e}") from e
 
 _mcp_host = os.getenv("MCP_HOST", "127.0.0.1")
 _mcp_port = int(os.getenv("MCP_PORT", "8000"))
@@ -134,6 +145,28 @@ def evidence_wait_for_bundle(incident_id: str, timeout_seconds: int = 30, poll_s
     out = wait_for(_getter, incident_id, timeout_seconds=timeout_seconds, poll_seconds=poll_seconds)
     out["correlation_id"] = corr
     return out
+
+
+
+@mcp.tool()
+def evidence_get_bundle(incident_id: str) -> dict:
+    store = os.getenv("ARTIFACT_STORE", "s3").lower()
+    corr = audit.write("evidence.get_bundle", {"incident_id": incident_id, "store": store}, ok=True)
+
+    if store == "s3":
+        out = read_evidence_bundle(incident_id)
+        if not out.get("found"):
+            out["correlation_id"] = corr
+            return out
+        bundle = EvidenceBundle.model_validate(out["raw"])
+        return {"correlation_id": corr, "found": True, "uri": out["uri"], "bundle": bundle.model_dump()}
+
+    # optional fs fallback if you still want it
+    artifact_dir = os.getenv("AIRFLOW_ARTIFACT_DIR", "./airflow/artifacts")
+    out = load_bundle(artifact_dir, incident_id)
+    out["correlation_id"] = corr
+    return out
+
 
 if __name__ == "__main__":
     main()
