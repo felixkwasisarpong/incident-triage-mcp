@@ -33,6 +33,25 @@ class RunbookHit(BaseModel):
     summary: str
 
 
+class TriageSummary(BaseModel):
+    incident_id: str
+    service: str
+    priority: str
+    status: str
+    time_window: TimeWindow
+
+    headline: str
+    key_findings: list[str] = Field(default_factory=list)
+    top_signals: list[Signal] = Field(default_factory=list)
+    top_alerts: list[Alert] = Field(default_factory=list)
+    runbook_hits: list[RunbookHit] = Field(default_factory=list)
+
+    likely_causes: list[str] = Field(default_factory=list)
+    recommended_next_steps: list[str] = Field(default_factory=list)
+
+    evidence_uri: Optional[str] = None
+    generated_at_iso: str
+
 class EvidenceBundle(BaseModel):
     """
     The single source of truth produced by Airflow, consumed by MCP tools,
