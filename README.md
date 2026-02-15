@@ -1,5 +1,3 @@
-
-￼￼
 # Incident Triage MCP
 
 ![Python](https://img.shields.io/badge/python-3.10%2B-blue.svg)
@@ -29,9 +27,11 @@ It exposes structured, auditable triage tools (evidence collection, runbook sear
 - **Tool discovery:** tools are auto-discovered by MCP clients (e.g., `tools/list`)
 - **Structured schemas:** Pydantic models for tool inputs/outputs
 - **Evidence Bundle artifact:** a single JSON “source of truth” produced by workflows
+- **Artifact store:** filesystem (dev) or S3-compatible (MinIO/S3) for Docker/Kubernetes
 - **Audit-first:** JSONL audit events (stdout by default for k8s)
 - **Guardrails:** RBAC + safe-action allowlists (WIP / expanding)
 - **Pluggable integrations:** mock-first, real adapters added progressively
+- **Demo-friendly tools:** `evidence.wait_for_bundle` and deterministic `incident.triage_summary`
 
 ---
 
@@ -97,6 +97,19 @@ RUNBOOKS_DIR=./runbooks
 
 # Evidence artifacts (when reading local artifacts)
 AIRFLOW_ARTIFACT_DIR=./airflow/artifacts
+
+# Evidence artifacts (recommended for Docker/K8s)
+# Choose storage backend:
+#   ARTIFACT_STORE=fs  -> read/write local filesystem artifacts (fast local dev)
+#   ARTIFACT_STORE=s3  -> read/write via S3 API (MinIO locally, S3 in cloud)
+ARTIFACT_STORE=fs|s3
+
+# S3-compatible artifact store (required when ARTIFACT_STORE=s3)
+S3_ENDPOINT_URL=http://localhost:9000
+S3_BUCKET=triage-artifacts
+S3_REGION=us-east-1
+AWS_ACCESS_KEY_ID=minioadmin
+AWS_SECRET_ACCESS_KEY=minioadmin
 ```
 
 ---
@@ -105,8 +118,8 @@ AIRFLOW_ARTIFACT_DIR=./airflow/artifacts
 
 This repo supports a local dev stack where:
 - **Airflow** runs evidence workflows
-- **Artifacts** are written to a shared folder (`./airflow/artifacts`)
-- **MCP server** reads those artifacts and exposes them as tools
+- **MinIO (S3-compatible)** stores Evidence Bundles so the setup also works in Kubernetes
+- **MCP server** reads Evidence Bundles from MinIO/S3 (or filesystem in dev mode)
 
 ### Start
 
@@ -127,13 +140,28 @@ docker compose up --build
 
 > Tip: Claude Desktop usually spawns MCP servers via **stdio**. For Docker/HTTP, you typically use an MCP client that supports HTTP or add a small local stdio→HTTP bridge.
 
+### MinIO (artifact store)
+
+- S3 API: `http://localhost:9000`
+- Console UI: `http://localhost:9001`
+- Credentials (dev): `minioadmin / minioadmin`
+
+Check artifacts:
+
+```bash
+docker run --rm --network incident-triage-mcp_default \
+  -e MC_HOST_local=http://minioadmin:minioadmin@minio:9000 \
+  minio/mc:latest ls local/triage-artifacts/evidence/v1/
+```
+
 ---
 
 ## Evidence Bundle workflow
 
 **Airflow produces** a single artifact per incident:
 
-- `./airflow/artifacts/<INCIDENT_ID>.json`
+- `fs: ./airflow/artifacts/<INCIDENT_ID>.json` (dev)
+- `s3: s3://triage-artifacts/evidence/v1/<INCIDENT_ID>.json` (Docker/K8s)
 
 The MCP server exposes tools to:
 - trigger evidence DAGs
@@ -144,8 +172,22 @@ This is the intended flow:
 
 1) Agent/host triggers evidence collection (Airflow DAG)
 2) Airflow writes the Evidence Bundle JSON artifact
+2.5) Agent/host optionally calls `evidence.wait_for_bundle` to poll until the artifact exists
 3) Agent/host reads the bundle via MCP tools
 4) (later) ticket creation + safe actions use the same bundle
+
+---
+
+## Demo flow (agent/host)
+
+Typical demo sequence:
+
+1) Trigger evidence collection:
+   - `airflow_trigger_incident_dag(incident_id="INC-123", service="payments-api", window_minutes=30)`
+2) Wait for the Evidence Bundle:
+   - `evidence_wait_for_bundle(incident_id="INC-123", timeout_seconds=90, poll_seconds=2)`
+3) Generate a deterministic triage summary (no LLM required):
+   - `incident_triage_summary(incident_id="INC-123")`
 
 ---
 
@@ -187,12 +229,15 @@ Now the MCP service is reachable at `http://localhost:3333`.
 
 > Note: In Kubernetes, `AUDIT_MODE=stdout` is recommended so log collectors can capture audit events.
 
+> If MinIO is running in Docker on your Mac and MCP is running in kind, set `S3_ENDPOINT_URL` to `http://host.docker.internal:9000` in the Kubernetes Deployment.
+
 ---
 
 ## Roadmap (next)
 
 - Replace mocks with **real adapters** (Jira/Datadog/etc.) via env-based provider selection
-- Add **artifact store** that works in k8s (S3/MinIO) instead of filesystem-only
+- ✅ Artifact store for Docker/K8s via MinIO/S3 (filesystem remains for fast local dev)
+- Add a Helm chart + GitHub Actions to build/push multi-arch Docker images
 - Expand **RBAC + safe actions** with preconditions and approval tokens
 - Add richer **observability** (metrics + structured tracing)
 
