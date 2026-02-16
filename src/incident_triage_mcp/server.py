@@ -16,7 +16,9 @@ from incident_triage_mcp.domain_models import EvidenceBundle
 from incident_triage_mcp.config import ConfigError,load_config
 from incident_triage_mcp.tools.triage import build_triage_summary
 from incident_triage_mcp.tools.jira_draft import build_jira_draft
-
+from incident_triage_mcp.policy.rbac import require_allowed, role
+from incident_triage_mcp.policy.safe_actions import SafeActionContext, enforce, SafeActionError
+from incident_triage_mcp.adapters.jira_provider import get_provider, provider_name
 
 
 try:
@@ -207,6 +209,93 @@ def jira_draft_ticket(incident_id: str, project_key: str = "INC") -> dict:
     out["correlation_id"] = corr
     return out
 
+
+
+@mcp.tool()
+def jira_create_ticket(
+    incident_id: str,
+    project_key: str = "INC",
+    dry_run: bool = True,
+    reason: str | None = None,
+    confirm_token: str | None = None,
+    idempotency_key: str | None = None,
+) -> dict:
+    """
+    Safe action:
+    - dry_run=True by default (no mutation)
+    - dry_run=False requires reason + confirm_token + RBAC allow
+    """
+    tool_name = "jira.create_ticket"
+    corr = audit.write(
+        "jira.create_ticket.request",
+        {
+            "incident_id": incident_id,
+            "project_key": project_key,
+            "dry_run": dry_run,
+            "role": role(),
+            "idempotency_key": idempotency_key,
+            "provider": provider_name(),
+        },
+        ok=True,
+    )
+
+    # RBAC first
+    require_allowed(tool_name)
+
+    # Build the draft from the Evidence Bundle you already have
+    evidence = evidence_get_bundle(incident_id)
+    if not evidence.get("found"):
+        evidence["correlation_id"] = corr
+        return evidence
+
+    bundle = evidence.get("bundle") or {}
+    evidence_uri = evidence.get("uri") or evidence.get("path")
+
+    try:
+        draft = build_jira_draft(bundle, project_key=project_key, evidence_uri=evidence_uri)
+    except Exception as e:
+        audit.write("jira.create_ticket.draft_error", {"error": str(e)}, ok=False)
+        return {"created": False, "error": f"draft_failed: {e}"}
+
+    # Enforce safe action (only if actually creating)
+    try:
+        enforce(
+            SafeActionContext(
+                tool_name=tool_name,
+                role=role(),
+                dry_run=dry_run,
+                reason=reason,
+                confirm_token=confirm_token,
+                idempotency_key=idempotency_key,
+            )
+        )
+    except SafeActionError as e:
+        # return a structured safe failure (still auditable)
+        audit.write("jira.create_ticket.denied", {"correlation_id": corr, "error": str(e)}, ok=False)
+        return {"correlation_id": corr, "created": False, "dry_run": dry_run, "error": str(e), "draft": draft}
+
+    # If dry-run, do not create
+    if dry_run:
+        return {"correlation_id": corr, "created": False, "dry_run": True, "draft": draft}
+
+    # Create via provider
+    provider = get_provider()
+    payload = {
+        "project_key": project_key,
+        "issue_type": "Incident",
+        "title": draft["title"],
+        "priority": draft["priority"],
+        "labels": draft["labels"],
+        "description_md": draft["description_md"],
+        "evidence_uri": draft.get("evidence_uri"),
+        "idempotency_key": idempotency_key,
+        "reason": reason,
+    }
+
+    result = provider.create_issue(payload)
+    audit.write("jira.create_ticket.created", {"correlation_id": corr, "result": {k: result.get(k) for k in ["created","issue_key","browse_url","provider"]}}, ok=True)
+
+    return {"correlation_id": corr, "dry_run": False, **result}
 
 if __name__ == "__main__":
     main()
