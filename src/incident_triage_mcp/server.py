@@ -297,5 +297,25 @@ def jira_create_ticket(
 
     return {"correlation_id": corr, "dry_run": False, **result}
 
+@mcp.tool()
+def jira_validate_credentials() -> dict:
+    """
+    Safe read-only Jira Cloud auth check. Does not create anything.
+    """
+    corr = audit.write("jira.validate_credentials", {}, ok=True)
+
+    if provider_name() != "cloud":
+        return {"correlation_id": corr, "ok": False, "error": "Set JIRA_PROVIDER=cloud to validate Jira Cloud credentials."}
+
+    try:
+        provider = get_provider()
+        out = provider.validate()
+        out["correlation_id"] = corr
+        out["ok"] = True
+        return out
+    except Exception as e:
+        audit.write("jira.validate_credentials.error", {"error": str(e)}, ok=False)
+        return {"correlation_id": corr, "ok": False, "error": str(e)}
+
 if __name__ == "__main__":
     main()

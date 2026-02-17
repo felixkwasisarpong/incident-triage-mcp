@@ -30,7 +30,8 @@ It exposes structured, auditable triage tools (evidence collection, runbook sear
 - **Artifact store:** filesystem (dev) or S3-compatible (MinIO/S3) for Docker/Kubernetes
 - **Audit-first:** JSONL audit events (stdout by default for k8s)
 - **Guardrails:** RBAC + safe-action allowlists (WIP / expanding)
-- **Pluggable integrations:** mock-first, real adapters added progressively
+- **Pluggable integrations:** mock-first, real adapters added progressively (env-based provider selection)
+- **Safe ticketing:** draft Jira tickets + gated create (dry-run by default, RBAC + confirm token)
 - **Demo-friendly tools:** `evidence.wait_for_bundle` and deterministic `incident.triage_summary`
 
 ---
@@ -68,6 +69,18 @@ incident-triage-mcp/
 ### 1) Install + run (stdio)
 
 ```bash
+# RBAC + safe actions
+MCP_ROLE=viewer|triager|responder|admin
+CONFIRM_TOKEN=CHANGE_ME_12345   # required for non-dry-run safe actions
+
+# Jira provider selection
+JIRA_PROVIDER=mock|cloud
+
+# Jira Cloud (required when JIRA_PROVIDER=cloud)
+JIRA_BASE_URL=https://your-domain.atlassian.net
+JIRA_EMAIL=you@example.com
+JIRA_API_TOKEN=***
+
 # from repo root
 pip install -e .
 
@@ -191,6 +204,24 @@ Typical demo sequence:
 
 ---
 
+## Jira ticketing demo
+
+0) Validate Jira Cloud credentials (cloud provider only):
+   - `jira_validate_credentials()`
+
+1) Draft a ticket (no credentials required):
+   - `jira_draft_ticket(incident_id="INC-123", project_key="PAY")`
+
+2) Safe create (mock provider by default):
+   - Dry run (default):
+     - `jira_create_ticket(incident_id="INC-123", project_key="PAY")`
+   - Create (requires explicit approval inputs):
+     - `jira_create_ticket(incident_id="INC-123", project_key="PAY", dry_run=false, reason="Track incident timeline and coordinate responders", confirm_token="CHANGE_ME_12345", idempotency_key="INC-123-PAY-1")`
+
+Notes:
+- Non-dry-run is blocked unless **RBAC** allows it (`MCP_ROLE=responder|admin`) and `CONFIRM_TOKEN` is provided.
+- Swap providers via env: `JIRA_PROVIDER=mock` (demo) or `JIRA_PROVIDER=cloud` (real Jira Cloud).
+
 ## Runbooks (local Markdown)
 
 Put Markdown runbooks in:
@@ -235,7 +266,7 @@ Now the MCP service is reachable at `http://localhost:3333`.
 
 ## Roadmap (next)
 
-- Replace mocks with **real adapters** (Jira/Datadog/etc.) via env-based provider selection
+- ✅ Ticketing: Jira draft + gated create (mock provider); add Jira Cloud provider wiring + richer formatting
 - ✅ Artifact store for Docker/K8s via MinIO/S3 (filesystem remains for fast local dev)
 - Add a Helm chart + GitHub Actions to build/push multi-arch Docker images
 - Expand **RBAC + safe actions** with preconditions and approval tokens
