@@ -15,6 +15,7 @@ from incident_triage_mcp.adapters.artifacts_s3 import read_evidence_bundle
 from incident_triage_mcp.domain_models import EvidenceBundle
 from incident_triage_mcp.config import ConfigError,load_config
 from incident_triage_mcp.tools.triage import build_triage_summary
+from incident_triage_mcp.tools.jira_draft import build_jira_draft
 
 
 
@@ -187,6 +188,22 @@ def incident_triage_summary(incident_id: str) -> dict:
     bundle = evidence.get("bundle") or {}
     uri = evidence.get("uri")
     out = build_triage_summary(bundle, evidence_uri=uri)
+    out["correlation_id"] = corr
+    return out
+
+@mcp.tool()
+def jira_draft_ticket(incident_id: str, project_key: str = "INC") -> dict:
+    corr = audit.write("jira.draft_ticket", {"incident_id": incident_id, "project_key": project_key}, ok=True)
+
+    evidence = evidence_get_bundle(incident_id)
+    if not evidence.get("found"):
+        evidence["correlation_id"] = corr
+        return evidence
+
+    bundle = evidence.get("bundle") or {}
+    uri = evidence.get("uri") or evidence.get("path")
+    out = build_jira_draft(bundle, evidence_uri=uri)
+    out["project_key"] = project_key
     out["correlation_id"] = corr
     return out
 

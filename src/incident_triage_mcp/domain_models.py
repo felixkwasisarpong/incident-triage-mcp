@@ -52,6 +52,18 @@ class TriageSummary(BaseModel):
     evidence_uri: Optional[str] = None
     generated_at_iso: str
 
+
+class JiraDraftTicket(BaseModel):
+    incident_id: str
+    project_key: str = "INC"
+    issue_type: str = "Incident"
+    title: str
+    priority: str
+    labels: list[str] = Field(default_factory=list)
+    description_md: str
+    evidence_uri: str | None = None
+    generated_at_iso: str
+
 class EvidenceBundle(BaseModel):
     """
     The single source of truth produced by Airflow, consumed by MCP tools,
