@@ -35,6 +35,16 @@ runbooks = RunbooksLocal()
 airflow = AirflowAPI(base_url=os.getenv("AIRFLOW_BASE_URL", "http://localhost:8080"))
 
 
+def _jira_project_key(project_key: str | None) -> str:
+    resolved = (project_key or os.getenv("JIRA_PROJECT_KEY", "INC") or "INC").strip()
+    return resolved or "INC"
+
+
+def _jira_issue_type() -> str:
+    resolved = (os.getenv("JIRA_ISSUE_TYPE", "Task") or "Task").strip()
+    return resolved or "Task"
+
+
 @mcp.tool()
 def incident_triage_run(incident_id: str, service: str) -> dict:
     """
@@ -194,8 +204,9 @@ def incident_triage_summary(incident_id: str) -> dict:
     return out
 
 @mcp.tool()
-def jira_draft_ticket(incident_id: str, project_key: str = "INC") -> dict:
-    corr = audit.write("jira.draft_ticket", {"incident_id": incident_id, "project_key": project_key}, ok=True)
+def jira_draft_ticket(incident_id: str, project_key: str | None = None) -> dict:
+    resolved_project_key = _jira_project_key(project_key)
+    corr = audit.write("jira.draft_ticket", {"incident_id": incident_id, "project_key": resolved_project_key}, ok=True)
 
     evidence = evidence_get_bundle(incident_id)
     if not evidence.get("found"):
@@ -204,8 +215,12 @@ def jira_draft_ticket(incident_id: str, project_key: str = "INC") -> dict:
 
     bundle = evidence.get("bundle") or {}
     uri = evidence.get("uri") or evidence.get("path")
-    out = build_jira_draft(bundle, evidence_uri=uri)
-    out["project_key"] = project_key
+    out = build_jira_draft(
+        bundle,
+        project_key=resolved_project_key,
+        issue_type=_jira_issue_type(),
+        evidence_uri=uri,
+    )
     out["correlation_id"] = corr
     return out
 
@@ -214,7 +229,7 @@ def jira_draft_ticket(incident_id: str, project_key: str = "INC") -> dict:
 @mcp.tool()
 def jira_create_ticket(
     incident_id: str,
-    project_key: str = "INC",
+    project_key: str | None = None,
     dry_run: bool = True,
     reason: str | None = None,
     confirm_token: str | None = None,
@@ -226,11 +241,14 @@ def jira_create_ticket(
     - dry_run=False requires reason + confirm_token + RBAC allow
     """
     tool_name = "jira.create_ticket"
+    resolved_project_key = _jira_project_key(project_key)
+    resolved_issue_type = _jira_issue_type()
     corr = audit.write(
         "jira.create_ticket.request",
         {
             "incident_id": incident_id,
-            "project_key": project_key,
+            "project_key": resolved_project_key,
+            "issue_type": resolved_issue_type,
             "dry_run": dry_run,
             "role": role(),
             "idempotency_key": idempotency_key,
@@ -252,7 +270,12 @@ def jira_create_ticket(
     evidence_uri = evidence.get("uri") or evidence.get("path")
 
     try:
-        draft = build_jira_draft(bundle, project_key=project_key, evidence_uri=evidence_uri)
+        draft = build_jira_draft(
+            bundle,
+            project_key=resolved_project_key,
+            issue_type=resolved_issue_type,
+            evidence_uri=evidence_uri,
+        )
     except Exception as e:
         audit.write("jira.create_ticket.draft_error", {"error": str(e)}, ok=False)
         return {"created": False, "error": f"draft_failed: {e}"}
@@ -281,8 +304,8 @@ def jira_create_ticket(
     # Create via provider
     provider = get_provider()
     payload = {
-        "project_key": project_key,
-        "issue_type": "Incident",
+        "project_key": resolved_project_key,
+        "issue_type": resolved_issue_type,
         "title": draft["title"],
         "priority": draft["priority"],
         "labels": draft["labels"],

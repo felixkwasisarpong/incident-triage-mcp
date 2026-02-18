@@ -20,7 +20,7 @@ class JiraCloudProvider:
 
         fields = {
             "project": {"key": payload["project_key"]},
-            "issuetype": {"name": payload.get("issue_type", "Incident")},
+            "issuetype": {"name": payload.get("issue_type", "Task")},
             "summary": payload["title"],
             "description": {
                 "type": "doc",

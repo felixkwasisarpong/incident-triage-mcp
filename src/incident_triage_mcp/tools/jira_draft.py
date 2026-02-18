@@ -11,7 +11,12 @@ def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
-def build_jira_draft(bundle_dict: Dict[str, Any],project_key: str = "INC", evidence_uri: str | None = None) -> Dict[str, Any]:
+def build_jira_draft(
+    bundle_dict: Dict[str, Any],
+    project_key: str = "INC",
+    issue_type: str = "Task",
+    evidence_uri: str | None = None,
+) -> Dict[str, Any]:
     bundle = EvidenceBundle.model_validate(bundle_dict)
 
     # Priority: pick best from alerts if present, else P3
@@ -81,6 +86,7 @@ def build_jira_draft(bundle_dict: Dict[str, Any],project_key: str = "INC", evide
     draft = JiraDraftTicket(
         incident_id=bundle.incident_id,
         project_key=project_key,
+        issue_type=issue_type,
         title=title,
         priority=priority,
         labels=labels,

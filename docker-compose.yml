@@ -115,6 +115,14 @@ services:
       AIRFLOW_BASE_URL: http://airflow-webserver:8080
       AIRFLOW_USERNAME: admin
       AIRFLOW_PASSWORD: admin
+      MCP_ROLE: ${MCP_ROLE:-viewer}
+      CONFIRM_TOKEN: ${CONFIRM_TOKEN:-}
+      JIRA_PROVIDER: ${JIRA_PROVIDER:-mock}
+      JIRA_BASE_URL: ${JIRA_BASE_URL:-}
+      JIRA_EMAIL: ${JIRA_EMAIL:-}
+      JIRA_API_TOKEN: ${JIRA_API_TOKEN:-}
+      JIRA_PROJECT_KEY: ${JIRA_PROJECT_KEY:-INC}
+      JIRA_ISSUE_TYPE: ${JIRA_ISSUE_TYPE:-Task}
       RUNBOOKS_DIR: /runbooks
     volumes:
       - ./data:/data

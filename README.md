@@ -75,6 +75,8 @@ CONFIRM_TOKEN=CHANGE_ME_12345   # required for non-dry-run safe actions
 
 # Jira provider selection
 JIRA_PROVIDER=mock|cloud
+JIRA_PROJECT_KEY=INC
+JIRA_ISSUE_TYPE=Task
 
 # Jira Cloud (required when JIRA_PROVIDER=cloud)
 JIRA_BASE_URL=https://your-domain.atlassian.net
@@ -123,6 +125,10 @@ S3_BUCKET=triage-artifacts
 S3_REGION=us-east-1
 AWS_ACCESS_KEY_ID=minioadmin
 AWS_SECRET_ACCESS_KEY=minioadmin
+
+# Jira ticket defaults
+JIRA_PROJECT_KEY=INC
+JIRA_ISSUE_TYPE=Task
 ```
 
 ---
@@ -209,18 +215,21 @@ Typical demo sequence:
 0) Validate Jira Cloud credentials (cloud provider only):
    - `jira_validate_credentials()`
 
-1) Draft a ticket (no credentials required):
-   - `jira_draft_ticket(incident_id="INC-123", project_key="PAY")`
+1) Draft a ticket (no credentials required, uses `JIRA_PROJECT_KEY` by default):
+   - `jira_draft_ticket(incident_id="INC-123")`
+   - Override project key per call: `jira_draft_ticket(incident_id="INC-123", project_key="PAY")`
 
 2) Safe create (mock provider by default):
    - Dry run (default):
-     - `jira_create_ticket(incident_id="INC-123", project_key="PAY")`
+     - `jira_create_ticket(incident_id="INC-123")`
+     - Override project key per call: `jira_create_ticket(incident_id="INC-123", project_key="PAY")`
    - Create (requires explicit approval inputs):
-     - `jira_create_ticket(incident_id="INC-123", project_key="PAY", dry_run=false, reason="Track incident timeline and coordinate responders", confirm_token="CHANGE_ME_12345", idempotency_key="INC-123-PAY-1")`
+     - `jira_create_ticket(incident_id="INC-123", dry_run=false, reason="Track incident timeline and coordinate responders", confirm_token="CHANGE_ME_12345", idempotency_key="INC-123-PAY-1")`
 
 Notes:
 - Non-dry-run is blocked unless **RBAC** allows it (`MCP_ROLE=responder|admin`) and `CONFIRM_TOKEN` is provided.
 - Swap providers via env: `JIRA_PROVIDER=mock` (demo) or `JIRA_PROVIDER=cloud` (real Jira Cloud).
+- `JIRA_ISSUE_TYPE` defaults to `Task` (used for creates unless overridden in code).
 
 ## Runbooks (local Markdown)
 
