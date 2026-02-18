@@ -56,7 +56,7 @@ class TriageSummary(BaseModel):
 class JiraDraftTicket(BaseModel):
     incident_id: str
     project_key: str = "INC"
-    issue_type: str = "Incident"
+    issue_type: str = "Task"
     title: str
     priority: str
     labels: list[str] = Field(default_factory=list)
