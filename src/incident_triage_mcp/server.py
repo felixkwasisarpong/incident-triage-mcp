@@ -3,6 +3,7 @@ from incident_triage_mcp.audit import AuditLog
 import os
 from pathlib import Path
 import json
+import requests
 from mcp.server.fastmcp import FastMCP
 from incident_triage_mcp.adapters.datadog_mock import DatadogMock
 from incident_triage_mcp.adapters.runbooks_local import RunbooksLocal
@@ -56,14 +57,41 @@ def _normalized_idempotency_key(idempotency_key: str | None) -> str | None:
     return key or None
 
 
-def _jira_project_key(project_key: str | None) -> str:
-    resolved = (project_key or os.getenv("JIRA_PROJECT_KEY", "INC") or "INC").strip()
-    return resolved or "INC"
+def _build_slack_message(
+    incident_id: str,
+    service: str | None = None,
+    summary: dict | None = None,
+    ticket: dict | None = None,
+) -> str:
+    lines = [f"*Incident Update*: `{incident_id}`"]
+    if service:
+        lines.append(f"*Service*: `{service}`")
 
+    if summary:
+        status = summary.get("status")
+        if status:
+            lines.append(f"*Status*: `{status}`")
+        alerts_count = summary.get("alerts_count")
+        if alerts_count is not None:
+            lines.append(f"*Alerts in window*: `{alerts_count}`")
 
-def _jira_issue_type() -> str:
-    resolved = (os.getenv("JIRA_ISSUE_TYPE", "Task") or "Task").strip()
-    return resolved or "Task"
+        next_steps = summary.get("next_steps") or []
+        if isinstance(next_steps, list) and next_steps:
+            lines.append("*Next Steps*:")
+            for step in next_steps[:3]:
+                lines.append(f"- {step}")
+
+    if ticket:
+        issue_key = ticket.get("issue_key")
+        browse_url = ticket.get("browse_url")
+        if issue_key and browse_url:
+            lines.append(f"*Ticket*: <{browse_url}|{issue_key}>")
+        elif issue_key:
+            lines.append(f"*Ticket*: `{issue_key}`")
+        elif ticket.get("dry_run"):
+            lines.append("*Ticket*: dry-run prepared")
+
+    return "\n".join(lines)
 
 
 @mcp.tool()
@@ -72,6 +100,9 @@ def incident_triage_run(
     service: str,
     include_ticket: bool = False,
     project_key: str | None = None,
+    notify_slack: bool = False,
+    slack_channel: str | None = None,
+    slack_dry_run: bool = True,
 ) -> dict:
     """
     One-call demo: alerts -> airflow evidence -> artifact -> summary.
@@ -84,6 +115,9 @@ def incident_triage_run(
             "service": service,
             "include_ticket": include_ticket,
             "project_key": resolved_project_key if include_ticket else None,
+            "notify_slack": notify_slack,
+            "slack_channel": slack_channel,
+            "slack_dry_run": slack_dry_run,
         },
         ok=True,
     )
@@ -91,7 +125,12 @@ def incident_triage_run(
     tickets_create = None
     if include_ticket:
         # Keep the orchestration path safe by default: ticket hook performs dry-run only.
-        def _ticket_hook(_title: str, _body: str, _severity: str) -> dict:
+        def _ticket_hook(
+            title: str | None = None,
+            body: str | None = None,
+            severity: str | None = None,
+            **_ignored: object,
+        ) -> dict:
             try:
                 return jira_create_ticket(
                     incident_id=incident_id,
@@ -111,6 +150,23 @@ def incident_triage_run(
         airflow_get_incident_artifact=airflow_get_incident_artifact,
         tickets_create=tickets_create,
     )
+
+    if notify_slack:
+        try:
+            result["slack"] = slack_post_update(
+                incident_id=incident_id,
+                service=service,
+                summary=result.get("summary"),
+                ticket=result.get("ticket"),
+                channel=slack_channel,
+                dry_run=slack_dry_run,
+            )
+        except Exception as e:
+            result["slack"] = {
+                "posted": False,
+                "dry_run": slack_dry_run,
+                "error": str(e),
+            }
 
     result["correlation_id"] = corr
     return result
@@ -149,6 +205,79 @@ def runbooks_search(query: str, limit: int = 5) -> dict:
 @mcp.tool()
 def ping(message: str = "hello") -> dict:
     return {"ok": True, "message": message}
+
+
+@mcp.tool()
+def slack_post_update(
+    incident_id: str,
+    service: str | None = None,
+    summary: dict | None = None,
+    ticket: dict | None = None,
+    channel: str | None = None,
+    dry_run: bool = True,
+    text: str | None = None,
+) -> dict:
+    """
+    Post an incident update to Slack via Incoming Webhook.
+    Safe-by-default: dry_run=True returns payload without sending.
+    """
+    resolved_channel = (channel or os.getenv("SLACK_DEFAULT_CHANNEL") or "").strip() or None
+    message = text or _build_slack_message(incident_id=incident_id, service=service, summary=summary, ticket=ticket)
+    payload = {"text": message}
+    if resolved_channel:
+        payload["channel"] = resolved_channel
+
+    corr = audit.write(
+        "slack.post_update.request",
+        {
+            "incident_id": incident_id,
+            "channel": resolved_channel,
+            "dry_run": dry_run,
+        },
+        ok=True,
+    )
+
+    if dry_run:
+        return {
+            "correlation_id": corr,
+            "posted": False,
+            "dry_run": True,
+            "channel": resolved_channel,
+            "payload": payload,
+        }
+
+    webhook = os.getenv("SLACK_WEBHOOK_URL")
+    if not webhook:
+        err = "SLACK_WEBHOOK_URL is not set. Configure it or call with dry_run=true."
+        audit.write("slack.post_update.error", {"correlation_id": corr, "error": err}, ok=False)
+        return {
+            "correlation_id": corr,
+            "posted": False,
+            "dry_run": False,
+            "channel": resolved_channel,
+            "error": err,
+            "payload": payload,
+        }
+
+    try:
+        r = requests.post(webhook, json=payload, timeout=15)
+        r.raise_for_status()
+        return {
+            "correlation_id": corr,
+            "posted": True,
+            "dry_run": False,
+            "channel": resolved_channel,
+        }
+    except Exception as e:
+        audit.write("slack.post_update.error", {"correlation_id": corr, "error": str(e)}, ok=False)
+        return {
+            "correlation_id": corr,
+            "posted": False,
+            "dry_run": False,
+            "channel": resolved_channel,
+            "error": str(e),
+            "payload": payload,
+        }
 
 @mcp.tool()
 def airflow_trigger_incident_dag(incident_id: str, service: str) -> dict:

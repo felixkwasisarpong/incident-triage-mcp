@@ -132,6 +132,53 @@ class TestServerTools(unittest.TestCase):
         self.assertEqual(self.server.ping(), {"ok": True, "message": "hello"})
         self.assertEqual(self.server.ping("hi"), {"ok": True, "message": "hi"})
 
+    def test_slack_post_update_dry_run(self) -> None:
+        out = self.server.slack_post_update(
+            incident_id="INC-100",
+            service="payments-api",
+            summary={"status": "triage_started", "alerts_count": 2, "next_steps": ["Check logs"]},
+            ticket={"dry_run": True},
+        )
+
+        self.assertEqual(out["correlation_id"], "corr-1")
+        self.assertFalse(out["posted"])
+        self.assertTrue(out["dry_run"])
+        self.assertIn("payload", out)
+        self.assertIn("Incident Update", out["payload"]["text"])
+
+    def test_slack_post_update_live_missing_webhook(self) -> None:
+        with patch.dict(os.environ, {"SLACK_WEBHOOK_URL": ""}, clear=False):
+            out = self.server.slack_post_update(
+                incident_id="INC-101",
+                service="payments-api",
+                dry_run=False,
+            )
+
+        self.assertEqual(out["correlation_id"], "corr-1")
+        self.assertFalse(out["posted"])
+        self.assertFalse(out["dry_run"])
+        self.assertIn("SLACK_WEBHOOK_URL", out["error"])
+
+    def test_slack_post_update_live_success(self) -> None:
+        response = Mock()
+        response.raise_for_status.return_value = None
+        with patch.dict(os.environ, {"SLACK_WEBHOOK_URL": "https://hooks.slack.test/abc"}, clear=False), patch.object(
+            self.server.requests, "post", return_value=response
+        ) as post_mock:
+            out = self.server.slack_post_update(
+                incident_id="INC-102",
+                service="payments-api",
+                channel="#incident-triage",
+                dry_run=False,
+            )
+
+        post_mock.assert_called_once()
+        payload = post_mock.call_args.kwargs["json"]
+        self.assertEqual(payload["channel"], "#incident-triage")
+        self.assertIn("INC-102", payload["text"])
+        self.assertTrue(out["posted"])
+        self.assertFalse(out["dry_run"])
+
     def test_incident_triage_run(self) -> None:
         with patch.object(self.server, "triage_incident_run", return_value={"status": "ok"}) as run_mock:
             out = self.server.incident_triage_run("INC-1", "payments-api")
@@ -165,6 +212,25 @@ class TestServerTools(unittest.TestCase):
             dry_run=True,
         )
 
+    def test_incident_triage_run_with_ticket_hook_keyword_payload(self) -> None:
+        def fake_triage(**kwargs):
+            ticket = kwargs["tickets_create"](title="title", body="body", severity="SEV2")
+            return {"status": "ok", "ticket": ticket}
+
+        with patch.object(self.server, "triage_incident_run", side_effect=fake_triage), patch.object(
+            self.server, "jira_create_ticket", return_value={"created": False, "dry_run": True, "draft": {"title": "x"}}
+        ) as jira_mock:
+            out = self.server.incident_triage_run("INC-2", "payments-api", include_ticket=True, project_key="PAY")
+
+        self.assertEqual(out["status"], "ok")
+        self.assertEqual(out["correlation_id"], "corr-1")
+        self.assertIn("ticket", out)
+        jira_mock.assert_called_once_with(
+            incident_id="INC-2",
+            project_key="PAY",
+            dry_run=True,
+        )
+
     def test_incident_triage_run_with_ticket_hook_handles_error(self) -> None:
         def fake_triage(**kwargs):
             return {"status": "ok", "ticket": kwargs["tickets_create"]("title", "body", "SEV2")}
@@ -178,6 +244,48 @@ class TestServerTools(unittest.TestCase):
         self.assertFalse(out["ticket"]["created"])
         self.assertTrue(out["ticket"]["dry_run"])
         self.assertIn("not allowed", out["ticket"]["error"])
+
+    def test_incident_triage_run_with_slack_notify(self) -> None:
+        with patch.object(
+            self.server,
+            "triage_incident_run",
+            return_value={"status": "ok", "summary": {"status": "triage_started"}, "ticket": {"issue_key": "PAY-1"}},
+        ), patch.object(
+            self.server,
+            "slack_post_update",
+            return_value={"posted": False, "dry_run": True, "payload": {"text": "preview"}},
+        ) as slack_mock:
+            out = self.server.incident_triage_run(
+                "INC-4",
+                "payments-api",
+                notify_slack=True,
+                slack_channel="#incident-triage",
+                slack_dry_run=True,
+            )
+
+        self.assertEqual(out["correlation_id"], "corr-1")
+        self.assertIn("slack", out)
+        slack_mock.assert_called_once_with(
+            incident_id="INC-4",
+            service="payments-api",
+            summary={"status": "triage_started"},
+            ticket={"issue_key": "PAY-1"},
+            channel="#incident-triage",
+            dry_run=True,
+        )
+
+    def test_incident_triage_run_with_slack_notify_handles_error(self) -> None:
+        with patch.object(
+            self.server,
+            "triage_incident_run",
+            return_value={"status": "ok", "summary": {"status": "triage_started"}},
+        ), patch.object(self.server, "slack_post_update", side_effect=RuntimeError("webhook timeout")):
+            out = self.server.incident_triage_run("INC-5", "payments-api", notify_slack=True, slack_dry_run=False)
+
+        self.assertEqual(out["correlation_id"], "corr-1")
+        self.assertFalse(out["slack"]["posted"])
+        self.assertFalse(out["slack"]["dry_run"])
+        self.assertIn("timeout", out["slack"]["error"])
 
     def test_alerts_fetch_active(self) -> None:
         alerts = [
