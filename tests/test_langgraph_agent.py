@@ -27,6 +27,10 @@ class _FakeServer:
         self._ticket_error = ticket_error
         self.calls = []
         self.ticket_calls = []
+    def __init__(self, result=None, error: Exception | None = None) -> None:
+        self._result = result or {"status": "ok"}
+        self._error = error
+        self.calls = []
 
     def incident_triage_run(self, **kwargs):
         self.calls.append(kwargs)
@@ -278,6 +282,10 @@ class TestLangGraphAgent(unittest.TestCase):
             self.assertNotIn("AIRFLOW_ARTIFACT_DIR", os.environ)
 
         self.assertEqual(code, 0)
+
+        self.assertEqual(code, 0)
+        self.assertEqual(os.environ["ARTIFACT_STORE"], "fs")
+        self.assertEqual(os.environ["AIRFLOW_ARTIFACT_DIR"], "./airflow/artifacts")
 
 
 if __name__ == "__main__":
