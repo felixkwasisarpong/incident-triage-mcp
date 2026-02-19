@@ -38,6 +38,7 @@ It exposes structured, auditable triage tools (evidence collection, runbook sear
 - **Jira discovery tools:** list accessible projects and project-specific issue types (read-only)
 - **Jira Cloud rich text:** draft content renders as clean ADF (H2 section headings + bullet lists + inline bold/code)
 - **Demo-friendly tools:** `evidence.wait_for_bundle` and deterministic `incident.triage_summary`
+- **Local LangGraph CLI agent:** run end-to-end triage without Claude Desktop restarts
 - **Automated tests:** unit tests cover all MCP tools in `server.py`
 
 ---
@@ -240,6 +241,9 @@ Typical demo sequence:
 4) Optional one-call orchestration (safe ticket dry-run hook):
    - `incident_triage_run(incident_id="INC-123", service="payments-api", include_ticket=true)`
    - Override project key for the ticket hook: `incident_triage_run(incident_id="INC-123", service="payments-api", include_ticket=true, project_key="PAY")`
+5) Optional Slack notification hook (safe dry-run by default):
+   - `incident_triage_run(incident_id="INC-123", service="payments-api", notify_slack=true)`
+   - Set channel and send for real: `incident_triage_run(incident_id="INC-123", service="payments-api", notify_slack=true, slack_channel="#incident-triage", slack_dry_run=false)`
 
 ---
 
