@@ -33,10 +33,7 @@ It exposes structured, auditable triage tools (evidence collection, runbook sear
 - **Pluggable integrations:** mock-first, real adapters added progressively (env-based provider selection)
 - **Safe ticketing:** draft Jira tickets + gated create (dry-run by default, RBAC + confirm token)
 - **Real idempotency for creates:** reusing `idempotency_key` returns the existing issue
-<<<<<<< HEAD
 - **Slack updates:** post incident summary + ticket context (safe dry-run by default)
-=======
->>>>>>> origin/main
 - **Jira discovery tools:** list accessible projects and project-specific issue types (read-only)
 - **Jira Cloud rich text:** draft content renders as clean ADF (H2 section headings + bullet lists + inline bold/code)
 - **Demo-friendly tools:** `evidence.wait_for_bundle` and deterministic `incident.triage_summary`
@@ -138,13 +135,10 @@ AWS_SECRET_ACCESS_KEY=minioadmin
 JIRA_PROJECT_KEY=INC
 JIRA_ISSUE_TYPE=Task
 
-<<<<<<< HEAD
 # Slack notifications
 SLACK_WEBHOOK_URL=https://hooks.slack.com/services/...
 SLACK_DEFAULT_CHANNEL=#incident-triage
 
-=======
->>>>>>> origin/main
 # Idempotency storage for ticket create retries
 IDEMPOTENCY_STORE_PATH=./data/jira_idempotency.json
 ```
@@ -247,6 +241,46 @@ Typical demo sequence:
 
 ---
 
+## LangGraph agent (no Claude restart loop)
+
+You can run triage locally through a LangGraph workflow and skip Claude Desktop restarts entirely.
+
+Install:
+
+```bash
+pip install -e .
+```
+
+Run:
+
+```bash
+incident-triage-agent \
+  --incident-id INC-123 \
+  --service payments-api \
+  --include-ticket \
+  --notify-slack \
+  --slack-channel "#incident-triage" \
+  --slack-live
+```
+
+Equivalent module form:
+
+```bash
+python -m incident_triage_mcp.agents.langgraph_agent \
+  --incident-id INC-123 \
+  --service payments-api \
+  --include-ticket \
+  --notify-slack \
+  --slack-channel "#incident-triage" \
+  --slack-live
+```
+
+Notes:
+- `--slack-live` sets `slack_dry_run=false`; omit it to preview payloads only.
+- Ticket hook in `incident_triage_run` remains dry-run by design for safety.
+
+---
+
 ## Jira ticketing demo
 
 0) Validate Jira Cloud credentials (cloud provider only):
@@ -274,12 +308,9 @@ Notes:
 - `JIRA_ISSUE_TYPE` defaults to `Task` (used for creates unless overridden in code).
 - Jira Cloud descriptions are sent as ADF and render section headers/bullets/inline formatting in the Jira UI.
 - Reusing the same `idempotency_key` on non-dry-run `jira_create_ticket` returns the existing issue instead of creating a duplicate.
-<<<<<<< HEAD
 - Slack tool:
   - `slack_post_update(...)` is dry-run by default.
   - Set `SLACK_WEBHOOK_URL` and call with `dry_run=false` for real delivery.
-=======
->>>>>>> origin/main
 
 ## Runbooks (local Markdown)
 
