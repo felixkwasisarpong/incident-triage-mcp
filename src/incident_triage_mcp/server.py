@@ -56,6 +56,16 @@ def _normalized_idempotency_key(idempotency_key: str | None) -> str | None:
     return key or None
 
 
+def _jira_project_key(project_key: str | None) -> str:
+    resolved = (project_key or os.getenv("JIRA_PROJECT_KEY", "INC") or "INC").strip()
+    return resolved or "INC"
+
+
+def _jira_issue_type() -> str:
+    resolved = (os.getenv("JIRA_ISSUE_TYPE", "Task") or "Task").strip()
+    return resolved or "Task"
+
+
 @mcp.tool()
 def incident_triage_run(
     incident_id: str,
