@@ -7,6 +7,7 @@ from mcp.server.fastmcp import FastMCP
 from incident_triage_mcp.adapters.datadog_mock import DatadogMock
 from incident_triage_mcp.adapters.runbooks_local import RunbooksLocal
 from incident_triage_mcp.adapters.airflow_api import AirflowAPI
+from incident_triage_mcp.adapters.idempotency_store import FileIdempotencyStore
 from incident_triage_mcp.tools.incidents import triage_incident_run
 from incident_triage_mcp.tools.evidence import load_bundle
 from incident_triage_mcp.tools.runbooks import search_runbooks as search_local_runbooks
@@ -33,6 +34,26 @@ audit = AuditLog()
 datadog = DatadogMock()
 runbooks = RunbooksLocal()
 airflow = AirflowAPI(base_url=os.getenv("AIRFLOW_BASE_URL", "http://localhost:8080"))
+ticket_idempotency_store = FileIdempotencyStore(
+    os.getenv("IDEMPOTENCY_STORE_PATH", "./data/jira_idempotency.json")
+)
+
+
+def _jira_project_key(project_key: str | None) -> str:
+    resolved = (project_key or os.getenv("JIRA_PROJECT_KEY", "INC") or "INC").strip()
+    return resolved or "INC"
+
+
+def _jira_issue_type() -> str:
+    resolved = (os.getenv("JIRA_ISSUE_TYPE", "Task") or "Task").strip()
+    return resolved or "Task"
+
+
+def _normalized_idempotency_key(idempotency_key: str | None) -> str | None:
+    if not idempotency_key:
+        return None
+    key = idempotency_key.strip()
+    return key or None
 
 
 def _jira_project_key(project_key: str | None) -> str:
@@ -46,11 +67,41 @@ def _jira_issue_type() -> str:
 
 
 @mcp.tool()
-def incident_triage_run(incident_id: str, service: str) -> dict:
+def incident_triage_run(
+    incident_id: str,
+    service: str,
+    include_ticket: bool = False,
+    project_key: str | None = None,
+) -> dict:
     """
     One-call demo: alerts -> airflow evidence -> artifact -> summary.
     """
-    corr = audit.write("incident.triage_run", {"incident_id": incident_id, "service": service}, ok=True)
+    resolved_project_key = _jira_project_key(project_key)
+    corr = audit.write(
+        "incident.triage_run",
+        {
+            "incident_id": incident_id,
+            "service": service,
+            "include_ticket": include_ticket,
+            "project_key": resolved_project_key if include_ticket else None,
+        },
+        ok=True,
+    )
+
+    tickets_create = None
+    if include_ticket:
+        # Keep the orchestration path safe by default: ticket hook performs dry-run only.
+        def _ticket_hook(_title: str, _body: str, _severity: str) -> dict:
+            try:
+                return jira_create_ticket(
+                    incident_id=incident_id,
+                    project_key=resolved_project_key,
+                    dry_run=True,
+                )
+            except Exception as e:
+                return {"created": False, "dry_run": True, "error": str(e)}
+
+        tickets_create = _ticket_hook
 
     result = triage_incident_run(
         incident_id=incident_id,
@@ -58,7 +109,7 @@ def incident_triage_run(incident_id: str, service: str) -> dict:
         alerts_fetch_active=alerts_fetch_active,
         airflow_trigger_incident_dag=airflow_trigger_incident_dag,
         airflow_get_incident_artifact=airflow_get_incident_artifact,
-        # tickets_create=tickets_create,  # uncomment when you wire Jira mock tool
+        tickets_create=tickets_create,
     )
 
     result["correlation_id"] = corr
@@ -243,6 +294,7 @@ def jira_create_ticket(
     tool_name = "jira.create_ticket"
     resolved_project_key = _jira_project_key(project_key)
     resolved_issue_type = _jira_issue_type()
+    normalized_idempotency_key = _normalized_idempotency_key(idempotency_key)
     corr = audit.write(
         "jira.create_ticket.request",
         {
@@ -251,7 +303,7 @@ def jira_create_ticket(
             "issue_type": resolved_issue_type,
             "dry_run": dry_run,
             "role": role(),
-            "idempotency_key": idempotency_key,
+            "idempotency_key": normalized_idempotency_key,
             "provider": provider_name(),
         },
         ok=True,
@@ -259,6 +311,21 @@ def jira_create_ticket(
 
     # RBAC first
     require_allowed(tool_name)
+
+    # For non-dry-run calls, replay existing result if this idempotency key has already been used.
+    if not dry_run and normalized_idempotency_key:
+        existing = ticket_idempotency_store.get(normalized_idempotency_key)
+        if existing:
+            audit.write(
+                "jira.create_ticket.idempotent_replay",
+                {
+                    "correlation_id": corr,
+                    "idempotency_key": normalized_idempotency_key,
+                    "issue_key": existing.get("issue_key"),
+                },
+                ok=True,
+            )
+            return {"correlation_id": corr, "dry_run": False, "idempotent_replay": True, **existing}
 
     # Build the draft from the Evidence Bundle you already have
     evidence = evidence_get_bundle(incident_id)
@@ -289,7 +356,7 @@ def jira_create_ticket(
                 dry_run=dry_run,
                 reason=reason,
                 confirm_token=confirm_token,
-                idempotency_key=idempotency_key,
+                idempotency_key=normalized_idempotency_key,
             )
         )
     except SafeActionError as e:
@@ -311,14 +378,88 @@ def jira_create_ticket(
         "labels": draft["labels"],
         "description_md": draft["description_md"],
         "evidence_uri": draft.get("evidence_uri"),
-        "idempotency_key": idempotency_key,
+        "idempotency_key": normalized_idempotency_key,
         "reason": reason,
     }
 
     result = provider.create_issue(payload)
+
+    if normalized_idempotency_key:
+        ticket_idempotency_store.set(
+            normalized_idempotency_key,
+            {
+                "created": bool(result.get("created", True)),
+                "provider": result.get("provider"),
+                "issue_key": result.get("issue_key"),
+                "browse_url": result.get("browse_url"),
+            },
+        )
+
     audit.write("jira.create_ticket.created", {"correlation_id": corr, "result": {k: result.get(k) for k in ["created","issue_key","browse_url","provider"]}}, ok=True)
 
     return {"correlation_id": corr, "dry_run": False, **result}
+
+
+@mcp.tool()
+def jira_list_projects() -> dict:
+    """
+    Read-only helper: list Jira projects visible to the configured credentials.
+    """
+    provider = provider_name()
+    corr = audit.write("jira.list_projects", {"provider": provider}, ok=True)
+
+    try:
+        projects = get_provider().list_projects()
+        return {
+            "correlation_id": corr,
+            "ok": True,
+            "provider": provider,
+            "projects": projects,
+        }
+    except Exception as e:
+        audit.write("jira.list_projects.error", {"error": str(e)}, ok=False)
+        return {
+            "correlation_id": corr,
+            "ok": False,
+            "provider": provider,
+            "projects": [],
+            "error": str(e),
+        }
+
+
+@mcp.tool()
+def jira_list_issue_types(project_key: str | None = None) -> dict:
+    """
+    Read-only helper: list available Jira issue types for a project key.
+    """
+    provider = provider_name()
+    resolved_project_key = _jira_project_key(project_key)
+    corr = audit.write(
+        "jira.list_issue_types",
+        {"provider": provider, "project_key": resolved_project_key},
+        ok=True,
+    )
+
+    try:
+        issue_types = get_provider().list_issue_types(resolved_project_key)
+        return {
+            "correlation_id": corr,
+            "ok": True,
+            "provider": provider,
+            "project_key": resolved_project_key,
+            "issue_types": issue_types,
+        }
+    except Exception as e:
+        audit.write("jira.list_issue_types.error", {"error": str(e)}, ok=False)
+        return {
+            "correlation_id": corr,
+            "ok": False,
+            "provider": provider,
+            "project_key": resolved_project_key,
+            "issue_types": [],
+            "error": str(e),
+        }
+
 
 @mcp.tool()
 def jira_validate_credentials() -> dict:

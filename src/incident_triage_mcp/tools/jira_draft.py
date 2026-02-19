@@ -29,21 +29,25 @@ def build_jira_draft(
     if any(a.status == "triggered" for a in bundle.alerts):
         labels.append("triggered")
 
-    # Build markdown body
-    lines = []
-    lines.append(f"## Summary\nService: **{bundle.service}**\nIncident: **{bundle.incident_id}**\nWindow: **{bundle.time_window.start_iso} → {bundle.time_window.end_iso}**\n")
+    # Keep ticket body intentionally simple for clean Jira rendering:
+    # H2 section headings and flat bullet lists only.
+    lines: list[str] = [
+        "## Summary",
+        f"- Service: **{bundle.service}**",
+        f"- Incident: **{bundle.incident_id}**",
+        f"- Window: **{bundle.time_window.start_iso} to {bundle.time_window.end_iso}**",
+    ]
     if evidence_uri:
-        lines.append(f"Evidence Bundle: `{evidence_uri}`\n")
+        lines.append(f"- Evidence Bundle: `{evidence_uri}`")
 
     if bundle.alerts:
-        lines.append("## Alerts\n")
+        lines.extend(["", "## Alerts"])
         for a in bundle.alerts[:5]:
-            lines.append(f"- **{a.name}** ({a.provider}) — `{a.status}` / `{a.priority}`")
+            lines.append(f"- **{a.name}** ({a.provider}) - `{a.status}` / `{a.priority}`")
 
     if bundle.signals:
-        lines.append("\n## Signals\n")
+        lines.extend(["", "## Signals"])
         for s in bundle.signals[:8]:
-            # Some schemas don't include `source`; keep it optional
             src = getattr(s, "source", None) or getattr(s, "provider", None) or getattr(s, "origin", None)
             if src:
                 lines.append(f"- `{s.key}`: **{s.value}** ({src})")
@@ -51,9 +55,8 @@ def build_jira_draft(
                 lines.append(f"- `{s.key}`: **{s.value}**")
 
     if bundle.runbook_hits:
-        lines.append("\n## Runbook hits")
+        lines.extend(["", "## Runbook Hits"])
         for r in sorted(bundle.runbook_hits, key=lambda x: x.score, reverse=True)[:5]:
-            # Support different schemas: some have `path`, others have `doc_id`/`summary`
             ref = (
                 getattr(r, "path", None)
                 or getattr(r, "doc_id", None)
@@ -62,20 +65,20 @@ def build_jira_draft(
             )
             extra = getattr(r, "summary", None)
 
-            line = f"- **{r.title}** (score={r.score})"
+            entry = f"**{r.title}** (score={r.score})"
             if ref:
-                line += f" — `{ref}`"
+                entry += f" - `{ref}`"
             if extra:
-                line += f"\n  - {extra}"
-            lines.append(line)
+                entry += f" - {extra}"
+            lines.append(f"- {entry}")
 
     if bundle.recommended_next_steps:
-        lines.append("\n## Recommended next steps\n")
+        lines.extend(["", "## Recommended Next Steps"])
         for step in bundle.recommended_next_steps[:8]:
             lines.append(f"- {step}")
 
     if bundle.links:
-        lines.append("\n## Links")
+        lines.extend(["", "## Links"])
         for l in bundle.links:
             ltype = l.get("type") if isinstance(l, dict) else getattr(l, "type", None)
             url = l.get("url") if isinstance(l, dict) else getattr(l, "url", None)

@@ -32,7 +32,11 @@ It exposes structured, auditable triage tools (evidence collection, runbook sear
 - **Guardrails:** RBAC + safe-action allowlists (WIP / expanding)
 - **Pluggable integrations:** mock-first, real adapters added progressively (env-based provider selection)
 - **Safe ticketing:** draft Jira tickets + gated create (dry-run by default, RBAC + confirm token)
+- **Real idempotency for creates:** reusing `idempotency_key` returns the existing issue
+- **Jira discovery tools:** list accessible projects and project-specific issue types (read-only)
+- **Jira Cloud rich text:** draft content renders as clean ADF (H2 section headings + bullet lists + inline bold/code)
 - **Demo-friendly tools:** `evidence.wait_for_bundle` and deterministic `incident.triage_summary`
+- **Automated tests:** unit tests cover all MCP tools in `server.py`
 
 ---
 
@@ -129,6 +133,9 @@ AWS_SECRET_ACCESS_KEY=minioadmin
 # Jira ticket defaults
 JIRA_PROJECT_KEY=INC
 JIRA_ISSUE_TYPE=Task
+
+# Idempotency storage for ticket create retries
+IDEMPOTENCY_STORE_PATH=./data/jira_idempotency.json
 ```
 
 ---
@@ -175,6 +182,19 @@ docker run --rm --network incident-triage-mcp_default \
 
 ---
 
+## Testing
+
+Run all tests:
+
+```bash
+UV_CACHE_DIR=.uv-cache /opt/anaconda3/bin/uv run --project . \
+  python -m unittest discover -s tests -p 'test_*.py' -v
+```
+
+The suite currently covers all MCP tools defined in `src/incident_triage_mcp/server.py`.
+
+---
+
 ## Evidence Bundle workflow
 
 **Airflow produces** a single artifact per incident:
@@ -202,11 +222,14 @@ This is the intended flow:
 Typical demo sequence:
 
 1) Trigger evidence collection:
-   - `airflow_trigger_incident_dag(incident_id="INC-123", service="payments-api", window_minutes=30)`
+   - `airflow_trigger_incident_dag(incident_id="INC-123", service="payments-api")`
 2) Wait for the Evidence Bundle:
    - `evidence_wait_for_bundle(incident_id="INC-123", timeout_seconds=90, poll_seconds=2)`
 3) Generate a deterministic triage summary (no LLM required):
    - `incident_triage_summary(incident_id="INC-123")`
+4) Optional one-call orchestration (safe ticket dry-run hook):
+   - `incident_triage_run(incident_id="INC-123", service="payments-api", include_ticket=true)`
+   - Override project key for the ticket hook: `incident_triage_run(incident_id="INC-123", service="payments-api", include_ticket=true, project_key="PAY")`
 
 ---
 
@@ -215,11 +238,16 @@ Typical demo sequence:
 0) Validate Jira Cloud credentials (cloud provider only):
    - `jira_validate_credentials()`
 
-1) Draft a ticket (no credentials required, uses `JIRA_PROJECT_KEY` by default):
+1) Discover Jira metadata first (recommended):
+   - `jira_list_projects()`
+   - `jira_list_issue_types()`  # uses `JIRA_PROJECT_KEY` default
+   - `jira_list_issue_types(project_key="SCRUM")`
+
+2) Draft a ticket (no credentials required, uses `JIRA_PROJECT_KEY` by default):
    - `jira_draft_ticket(incident_id="INC-123")`
    - Override project key per call: `jira_draft_ticket(incident_id="INC-123", project_key="PAY")`
 
-2) Safe create (mock provider by default):
+3) Safe create (mock provider by default):
    - Dry run (default):
      - `jira_create_ticket(incident_id="INC-123")`
      - Override project key per call: `jira_create_ticket(incident_id="INC-123", project_key="PAY")`
@@ -230,6 +258,8 @@ Notes:
 - Non-dry-run is blocked unless **RBAC** allows it (`MCP_ROLE=responder|admin`) and `CONFIRM_TOKEN` is provided.
 - Swap providers via env: `JIRA_PROVIDER=mock` (demo) or `JIRA_PROVIDER=cloud` (real Jira Cloud).
 - `JIRA_ISSUE_TYPE` defaults to `Task` (used for creates unless overridden in code).
+- Jira Cloud descriptions are sent as ADF and render section headers/bullets/inline formatting in the Jira UI.
+- Reusing the same `idempotency_key` on non-dry-run `jira_create_ticket` returns the existing issue instead of creating a duplicate.
 
 ## Runbooks (local Markdown)
 

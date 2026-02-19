@@ -12,3 +12,32 @@ class JiraMockProvider:
             "browse_url": f"https://example.local/jira/browse/{key}",
             "payload": payload,
         }
+
+    def validate(self) -> Dict[str, Any]:
+        return {"accountId": "mock-account", "displayName": "Mock Jira User"}
+
+    def list_projects(self) -> list[Dict[str, Any]]:
+        return [
+            {
+                "id": "10000",
+                "key": "SCRUM",
+                "name": "Scrum Project",
+                "project_type_key": "software",
+                "simplified": False,
+            },
+            {
+                "id": "10001",
+                "key": "INC",
+                "name": "Incident Management",
+                "project_type_key": "service_desk",
+                "simplified": True,
+            },
+        ]
+
+    def list_issue_types(self, project_key: str) -> list[Dict[str, Any]]:
+        _ = project_key
+        return [
+            {"id": "1", "name": "Task", "description": "A task that needs to be done.", "subtask": False},
+            {"id": "2", "name": "Bug", "description": "A problem that impairs functionality.", "subtask": False},
+            {"id": "3", "name": "Story", "description": "A feature request.", "subtask": False},
+        ]
