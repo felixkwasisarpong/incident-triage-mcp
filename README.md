@@ -227,6 +227,9 @@ Typical demo sequence:
    - `evidence_wait_for_bundle(incident_id="INC-123", timeout_seconds=90, poll_seconds=2)`
 3) Generate a deterministic triage summary (no LLM required):
    - `incident_triage_summary(incident_id="INC-123")`
+4) Optional one-call orchestration (safe ticket dry-run hook):
+   - `incident_triage_run(incident_id="INC-123", service="payments-api", include_ticket=true)`
+   - Override project key for the ticket hook: `incident_triage_run(incident_id="INC-123", service="payments-api", include_ticket=true, project_key="PAY")`
 
 ---
 

@@ -57,11 +57,41 @@ def _normalized_idempotency_key(idempotency_key: str | None) -> str | None:
 
 
 @mcp.tool()
-def incident_triage_run(incident_id: str, service: str) -> dict:
+def incident_triage_run(
+    incident_id: str,
+    service: str,
+    include_ticket: bool = False,
+    project_key: str | None = None,
+) -> dict:
     """
     One-call demo: alerts -> airflow evidence -> artifact -> summary.
     """
-    corr = audit.write("incident.triage_run", {"incident_id": incident_id, "service": service}, ok=True)
+    resolved_project_key = _jira_project_key(project_key)
+    corr = audit.write(
+        "incident.triage_run",
+        {
+            "incident_id": incident_id,
+            "service": service,
+            "include_ticket": include_ticket,
+            "project_key": resolved_project_key if include_ticket else None,
+        },
+        ok=True,
+    )
+
+    tickets_create = None
+    if include_ticket:
+        # Keep the orchestration path safe by default: ticket hook performs dry-run only.
+        def _ticket_hook(_title: str, _body: str, _severity: str) -> dict:
+            try:
+                return jira_create_ticket(
+                    incident_id=incident_id,
+                    project_key=resolved_project_key,
+                    dry_run=True,
+                )
+            except Exception as e:
+                return {"created": False, "dry_run": True, "error": str(e)}
+
+        tickets_create = _ticket_hook
 
     result = triage_incident_run(
         incident_id=incident_id,
@@ -69,7 +99,7 @@ def incident_triage_run(incident_id: str, service: str) -> dict:
         alerts_fetch_active=alerts_fetch_active,
         airflow_trigger_incident_dag=airflow_trigger_incident_dag,
         airflow_get_incident_artifact=airflow_get_incident_artifact,
-        # tickets_create=tickets_create,  # uncomment when you wire Jira mock tool
+        tickets_create=tickets_create,
     )
 
     result["correlation_id"] = corr

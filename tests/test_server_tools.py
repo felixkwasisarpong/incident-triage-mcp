@@ -143,6 +143,41 @@ class TestServerTools(unittest.TestCase):
         self.assertIs(run_mock.call_args.kwargs["alerts_fetch_active"], self.server.alerts_fetch_active)
         self.assertIs(run_mock.call_args.kwargs["airflow_trigger_incident_dag"], self.server.airflow_trigger_incident_dag)
         self.assertIs(run_mock.call_args.kwargs["airflow_get_incident_artifact"], self.server.airflow_get_incident_artifact)
+        self.assertIsNone(run_mock.call_args.kwargs["tickets_create"])
+
+    def test_incident_triage_run_with_ticket_hook(self) -> None:
+        def fake_triage(**kwargs):
+            ticket = kwargs["tickets_create"]("title", "body", "SEV2")
+            return {"status": "ok", "ticket": ticket}
+
+        with patch.object(self.server, "triage_incident_run", side_effect=fake_triage) as run_mock, patch.object(
+            self.server, "jira_create_ticket", return_value={"created": False, "dry_run": True, "draft": {"title": "x"}}
+        ) as jira_mock:
+            out = self.server.incident_triage_run("INC-2", "payments-api", include_ticket=True, project_key="PAY")
+
+        self.assertEqual(out["status"], "ok")
+        self.assertEqual(out["correlation_id"], "corr-1")
+        self.assertTrue("ticket" in out)
+        self.assertIsNotNone(run_mock.call_args.kwargs["tickets_create"])
+        jira_mock.assert_called_once_with(
+            incident_id="INC-2",
+            project_key="PAY",
+            dry_run=True,
+        )
+
+    def test_incident_triage_run_with_ticket_hook_handles_error(self) -> None:
+        def fake_triage(**kwargs):
+            return {"status": "ok", "ticket": kwargs["tickets_create"]("title", "body", "SEV2")}
+
+        with patch.object(self.server, "triage_incident_run", side_effect=fake_triage), patch.object(
+            self.server, "jira_create_ticket", side_effect=RuntimeError("Role 'viewer' is not allowed to call 'jira.create_ticket'.")
+        ):
+            out = self.server.incident_triage_run("INC-3", "payments-api", include_ticket=True)
+
+        self.assertEqual(out["status"], "ok")
+        self.assertFalse(out["ticket"]["created"])
+        self.assertTrue(out["ticket"]["dry_run"])
+        self.assertIn("not allowed", out["ticket"]["error"])
 
     def test_alerts_fetch_active(self) -> None:
         alerts = [
