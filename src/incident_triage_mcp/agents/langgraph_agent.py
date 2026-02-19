@@ -17,6 +17,11 @@ class IncidentGraphState(TypedDict, total=False):
     notify_slack: bool
     slack_channel: str | None
     slack_dry_run: bool
+    create_ticket_live: bool
+    ticket_reason: str | None
+    confirm_token: str | None
+    idempotency_key: str | None
+    live_ticket: dict[str, Any]
     result: dict[str, Any]
     error: str
 
@@ -46,6 +51,40 @@ def _run_triage_node(state: IncidentGraphState) -> IncidentGraphState:
 def _route_after_triage(state: IncidentGraphState) -> str:
     if state.get("error"):
         return "failed"
+    if state.get("create_ticket_live"):
+        return "create_live_ticket"
+    return "succeeded"
+
+
+def _default_live_idempotency_key(state: IncidentGraphState) -> str:
+    project = state.get("project_key") or os.getenv("JIRA_PROJECT_KEY", "INC") or "INC"
+    return f"{state['incident_id']}-{project}-live"
+
+
+def _create_live_ticket_node(state: IncidentGraphState) -> IncidentGraphState:
+    server = _load_server_module()
+    try:
+        ticket = server.jira_create_ticket(
+            incident_id=state["incident_id"],
+            project_key=state.get("project_key"),
+            dry_run=False,
+            reason=state.get("ticket_reason"),
+            confirm_token=state.get("confirm_token"),
+            idempotency_key=state.get("idempotency_key") or _default_live_idempotency_key(state),
+        )
+        result = state.get("result")
+        if isinstance(result, dict):
+            merged = dict(result)
+            merged["live_ticket"] = ticket
+            return {"result": merged, "live_ticket": ticket}
+        return {"live_ticket": ticket}
+    except Exception as exc:  # pragma: no cover - covered via run_agent tests
+        return {"error": str(exc)}
+
+
+def _route_after_live_ticket(state: IncidentGraphState) -> str:
+    if state.get("error"):
+        return "failed"
     return "succeeded"
 
 
@@ -56,12 +95,22 @@ def _identity_node(_state: IncidentGraphState) -> IncidentGraphState:
 def build_agent():
     graph = StateGraph(IncidentGraphState)
     graph.add_node("run_triage", _run_triage_node)
+    graph.add_node("create_live_ticket", _create_live_ticket_node)
     graph.add_node("succeeded", _identity_node)
     graph.add_node("failed", _identity_node)
     graph.set_entry_point("run_triage")
     graph.add_conditional_edges(
         "run_triage",
         _route_after_triage,
+        {
+            "create_live_ticket": "create_live_ticket",
+            "succeeded": "succeeded",
+            "failed": "failed",
+        },
+    )
+    graph.add_conditional_edges(
+        "create_live_ticket",
+        _route_after_live_ticket,
         {"succeeded": "succeeded", "failed": "failed"},
     )
     graph.add_edge("succeeded", END)
@@ -77,6 +126,10 @@ def run_agent(
     notify_slack: bool = False,
     slack_channel: str | None = None,
     slack_dry_run: bool = True,
+    create_ticket_live: bool = False,
+    ticket_reason: str | None = None,
+    confirm_token: str | None = None,
+    idempotency_key: str | None = None,
 ) -> IncidentGraphState:
     app = build_agent()
     initial_state: IncidentGraphState = {
@@ -87,6 +140,10 @@ def run_agent(
         "notify_slack": notify_slack,
         "slack_channel": slack_channel,
         "slack_dry_run": slack_dry_run,
+        "create_ticket_live": create_ticket_live,
+        "ticket_reason": ticket_reason,
+        "confirm_token": confirm_token,
+        "idempotency_key": idempotency_key,
     }
     return app.invoke(initial_state)
 
@@ -110,6 +167,23 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--include-ticket", action="store_true", help="Include Jira draft ticket hook")
     parser.add_argument("--project-key", help="Optional Jira project key override")
+    parser.add_argument(
+        "--create-ticket-live",
+        action="store_true",
+        help="Create Jira ticket for real after triage (requires reason + confirm token).",
+    )
+    parser.add_argument(
+        "--ticket-reason",
+        help="Required when --create-ticket-live is set.",
+    )
+    parser.add_argument(
+        "--confirm-token",
+        help="Safe-action confirm token; falls back to CONFIRM_TOKEN env.",
+    )
+    parser.add_argument(
+        "--idempotency-key",
+        help="Optional idempotency key for live ticket creation.",
+    )
     parser.add_argument("--notify-slack", action="store_true", help="Send Slack update via webhook tool")
     parser.add_argument("--slack-channel", help="Slack channel override (e.g. #incident-triage)")
     parser.add_argument(
@@ -124,6 +198,12 @@ def _build_parser() -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None) -> int:
     parser = _build_parser()
     args = parser.parse_args(argv)
+    confirm_token = args.confirm_token or os.getenv("CONFIRM_TOKEN")
+
+    if args.create_ticket_live and not args.ticket_reason:
+        parser.error("--ticket-reason is required when --create-ticket-live is set.")
+    if args.create_ticket_live and not confirm_token:
+        parser.error("--confirm-token (or CONFIRM_TOKEN env) is required when --create-ticket-live is set.")
 
     # Force deterministic local defaults for CLI usage.
     os.environ["ARTIFACT_STORE"] = args.artifact_store
@@ -138,6 +218,10 @@ def main(argv: list[str] | None = None) -> int:
         notify_slack=args.notify_slack,
         slack_channel=args.slack_channel,
         slack_dry_run=not args.slack_live,
+        create_ticket_live=args.create_ticket_live,
+        ticket_reason=args.ticket_reason,
+        confirm_token=confirm_token,
+        idempotency_key=args.idempotency_key,
     )
 
     payload = {

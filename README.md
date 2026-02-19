@@ -34,10 +34,10 @@ It exposes structured, auditable triage tools (evidence collection, runbook sear
 - **Safe ticketing:** draft Jira tickets + gated create (dry-run by default, RBAC + confirm token)
 - **Real idempotency for creates:** reusing `idempotency_key` returns the existing issue
 - **Slack updates:** post incident summary + ticket context (safe dry-run by default)
-- **Slack updates:** post incident summary + ticket context (safe dry-run by default)
 - **Jira discovery tools:** list accessible projects and project-specific issue types (read-only)
 - **Jira Cloud rich text:** draft content renders as clean ADF (H2 section headings + bullet lists + inline bold/code)
 - **Demo-friendly tools:** `evidence.wait_for_bundle` and deterministic `incident.triage_summary`
+- **Local LangGraph CLI agent:** run end-to-end triage without Claude Desktop restarts
 - **Automated tests:** unit tests cover all MCP tools in `server.py`
 
 ---
@@ -140,10 +140,6 @@ JIRA_ISSUE_TYPE=Task
 SLACK_WEBHOOK_URL=https://hooks.slack.com/services/...
 SLACK_DEFAULT_CHANNEL=#incident-triage
 
-# Slack notifications
-SLACK_WEBHOOK_URL=https://hooks.slack.com/services/...
-SLACK_DEFAULT_CHANNEL=#incident-triage
-
 # Idempotency storage for ticket create retries
 IDEMPOTENCY_STORE_PATH=./data/jira_idempotency.json
 ```
@@ -240,6 +236,40 @@ Typical demo sequence:
 4) Optional one-call orchestration (safe ticket dry-run hook):
    - `incident_triage_run(incident_id="INC-123", service="payments-api", include_ticket=true)`
    - Override project key for the ticket hook: `incident_triage_run(incident_id="INC-123", service="payments-api", include_ticket=true, project_key="PAY")`
+
+---
+
+## LangGraph agent (local CLI)
+
+Run triage directly from terminal (no Claude restart loop):
+
+```bash
+UV_CACHE_DIR=.uv-cache /opt/anaconda3/bin/uv run --project . incident-triage-agent \
+  --incident-id INC-123 \
+  --service payments-api \
+  --include-ticket \
+  --notify-slack \
+  --slack-channel "#incident-triage" \
+  --slack-live
+```
+
+Live Jira create (optional second graph step):
+
+```bash
+UV_CACHE_DIR=.uv-cache /opt/anaconda3/bin/uv run --project . incident-triage-agent \
+  --incident-id INC-123 \
+  --service payments-api \
+  --project-key SCRUM \
+  --create-ticket-live \
+  --ticket-reason "Create ticket for on-call tracking and RCA ownership" \
+  --confirm-token "CHANGE_ME_12345" \
+  --idempotency-key "INC-123-SCRUM-live-1"
+```
+
+Notes:
+- `--artifact-store` defaults to `fs` for local runs. Set `--artifact-store s3` to use S3-backed evidence.
+- `--create-ticket-live` requires `--ticket-reason` and a confirm token (`--confirm-token` or `CONFIRM_TOKEN` env).
+- Live ticket create calls `jira_create_ticket(dry_run=false)` and still follows RBAC + safe-action guardrails.
 
 ---
 
