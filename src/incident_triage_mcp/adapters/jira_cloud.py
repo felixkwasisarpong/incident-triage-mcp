@@ -1,9 +1,82 @@
 from __future__ import annotations
 
 import os
+import re
 from typing import Any, Dict
 
 import requests
+
+
+_INLINE_TOKEN_RE = re.compile(r"(\*\*[^*]+\*\*|`[^`]+`)")
+
+
+def _inline_nodes(text: str) -> list[Dict[str, Any]]:
+    nodes: list[Dict[str, Any]] = []
+    for token in _INLINE_TOKEN_RE.split(text):
+        if not token:
+            continue
+        if token.startswith("**") and token.endswith("**") and len(token) > 4:
+            nodes.append({"type": "text", "text": token[2:-2], "marks": [{"type": "strong"}]})
+            continue
+        if token.startswith("`") and token.endswith("`") and len(token) > 2:
+            nodes.append({"type": "text", "text": token[1:-1], "marks": [{"type": "code"}]})
+            continue
+        nodes.append({"type": "text", "text": token})
+    return nodes or [{"type": "text", "text": ""}]
+
+
+def _paragraph_node(text: str) -> Dict[str, Any]:
+    return {"type": "paragraph", "content": _inline_nodes(text)}
+
+
+def _heading_node(text: str, level: int = 2) -> Dict[str, Any]:
+    return {"type": "heading", "attrs": {"level": level}, "content": _inline_nodes(text)}
+
+
+def _bullet_list_node(items: list[str]) -> Dict[str, Any]:
+    return {
+        "type": "bulletList",
+        "content": [
+            {"type": "listItem", "content": [_paragraph_node(item)]}
+            for item in items
+        ],
+    }
+
+
+def _markdown_to_adf(markdown: str) -> Dict[str, Any]:
+    content: list[Dict[str, Any]] = []
+    bullets: list[str] = []
+
+    def flush_bullets() -> None:
+        if bullets:
+            content.append(_bullet_list_node(bullets.copy()))
+            bullets.clear()
+
+    for raw_line in (markdown or "").splitlines():
+        line = raw_line.strip()
+
+        if not line:
+            flush_bullets()
+            continue
+
+        if line.startswith("## "):
+            flush_bullets()
+            content.append(_heading_node(line[3:].strip(), level=2))
+            continue
+
+        if line.startswith("- "):
+            bullets.append(line[2:].strip())
+            continue
+
+        flush_bullets()
+        content.append(_paragraph_node(line))
+
+    flush_bullets()
+
+    if not content:
+        content.append(_paragraph_node("No details provided."))
+
+    return {"type": "doc", "version": 1, "content": content}
 
 
 class JiraCloudProvider:
@@ -22,13 +95,7 @@ class JiraCloudProvider:
             "project": {"key": payload["project_key"]},
             "issuetype": {"name": payload.get("issue_type", "Task")},
             "summary": payload["title"],
-            "description": {
-                "type": "doc",
-                "version": 1,
-                "content": [
-                    {"type": "paragraph", "content": [{"type": "text", "text": payload["description_md"]}]}
-                ],
-            },
+            "description": _markdown_to_adf(payload.get("description_md", "")),
             "labels": payload.get("labels", []),
         }
 
