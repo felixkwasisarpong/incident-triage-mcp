@@ -116,3 +116,86 @@ class JiraCloudProvider:
         r.raise_for_status()
         data = r.json()
         return {"accountId": data.get("accountId"), "displayName": data.get("displayName")}
+
+    def list_projects(self) -> list[Dict[str, Any]]:
+        auth = (self.email, self.api_token)
+        url = self.base_url.rstrip("/") + "/rest/api/3/project/search"
+        start_at = 0
+        out: list[Dict[str, Any]] = []
+
+        while True:
+            r = requests.get(
+                url,
+                auth=auth,
+                params={"startAt": start_at, "maxResults": 50},
+                timeout=20,
+            )
+            r.raise_for_status()
+            data = r.json()
+
+            values = data.get("values") or data.get("projects") or []
+            for p in values:
+                out.append(
+                    {
+                        "id": p.get("id"),
+                        "key": p.get("key"),
+                        "name": p.get("name"),
+                        "project_type_key": p.get("projectTypeKey"),
+                        "simplified": p.get("simplified"),
+                    }
+                )
+
+            if data.get("isLast", True):
+                break
+
+            if not values:
+                break
+
+            start_at = int(data.get("startAt", start_at)) + int(data.get("maxResults", len(values)))
+
+        return out
+
+    def list_issue_types(self, project_key: str) -> list[Dict[str, Any]]:
+        auth = (self.email, self.api_token)
+        issue_types: list[Dict[str, Any]] = []
+
+        # Preferred endpoint in modern Jira Cloud.
+        primary_url = self.base_url.rstrip("/") + f"/rest/api/3/issue/createmeta/{project_key}/issuetypes"
+        r = requests.get(primary_url, auth=auth, timeout=20)
+        if r.status_code != 404:
+            r.raise_for_status()
+            data = r.json()
+            values = data.get("values") if isinstance(data, dict) else data
+            for it in (values or []):
+                issue_types.append(
+                    {
+                        "id": it.get("id"),
+                        "name": it.get("name"),
+                        "description": it.get("description"),
+                        "subtask": bool(it.get("subtask", False)),
+                    }
+                )
+            return issue_types
+
+        # Backward-compatible fallback endpoint.
+        fallback_url = self.base_url.rstrip("/") + "/rest/api/3/issue/createmeta"
+        r = requests.get(
+            fallback_url,
+            auth=auth,
+            params={"projectKeys": project_key, "expand": "projects.issuetypes"},
+            timeout=20,
+        )
+        r.raise_for_status()
+        data = r.json()
+        projects = data.get("projects") or []
+        project = projects[0] if projects else {}
+        for it in (project.get("issuetypes") or []):
+            issue_types.append(
+                {
+                    "id": it.get("id"),
+                    "name": it.get("name"),
+                    "description": it.get("description"),
+                    "subtask": bool(it.get("subtask", False)),
+                }
+            )
+        return issue_types
