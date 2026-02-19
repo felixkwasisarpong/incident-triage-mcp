@@ -17,14 +17,11 @@ class IncidentGraphState(TypedDict, total=False):
     notify_slack: bool
     slack_channel: str | None
     slack_dry_run: bool
-<<<<<<< HEAD
     create_ticket_live: bool
     ticket_reason: str | None
     confirm_token: str | None
     idempotency_key: str | None
     live_ticket: dict[str, Any]
-=======
->>>>>>> origin/main
     result: dict[str, Any]
     error: str
 
@@ -54,7 +51,6 @@ def _run_triage_node(state: IncidentGraphState) -> IncidentGraphState:
 def _route_after_triage(state: IncidentGraphState) -> str:
     if state.get("error"):
         return "failed"
-<<<<<<< HEAD
     if state.get("create_ticket_live"):
         return "create_live_ticket"
     return "succeeded"
@@ -89,8 +85,6 @@ def _create_live_ticket_node(state: IncidentGraphState) -> IncidentGraphState:
 def _route_after_live_ticket(state: IncidentGraphState) -> str:
     if state.get("error"):
         return "failed"
-=======
->>>>>>> origin/main
     return "succeeded"
 
 
@@ -101,17 +95,13 @@ def _identity_node(_state: IncidentGraphState) -> IncidentGraphState:
 def build_agent():
     graph = StateGraph(IncidentGraphState)
     graph.add_node("run_triage", _run_triage_node)
-<<<<<<< HEAD
     graph.add_node("create_live_ticket", _create_live_ticket_node)
-=======
->>>>>>> origin/main
     graph.add_node("succeeded", _identity_node)
     graph.add_node("failed", _identity_node)
     graph.set_entry_point("run_triage")
     graph.add_conditional_edges(
         "run_triage",
         _route_after_triage,
-<<<<<<< HEAD
         {
             "create_live_ticket": "create_live_ticket",
             "succeeded": "succeeded",
@@ -121,8 +111,6 @@ def build_agent():
     graph.add_conditional_edges(
         "create_live_ticket",
         _route_after_live_ticket,
-=======
->>>>>>> origin/main
         {"succeeded": "succeeded", "failed": "failed"},
     )
     graph.add_edge("succeeded", END)
@@ -138,13 +126,10 @@ def run_agent(
     notify_slack: bool = False,
     slack_channel: str | None = None,
     slack_dry_run: bool = True,
-<<<<<<< HEAD
     create_ticket_live: bool = False,
     ticket_reason: str | None = None,
     confirm_token: str | None = None,
     idempotency_key: str | None = None,
-=======
->>>>>>> origin/main
 ) -> IncidentGraphState:
     app = build_agent()
     initial_state: IncidentGraphState = {
@@ -155,13 +140,10 @@ def run_agent(
         "notify_slack": notify_slack,
         "slack_channel": slack_channel,
         "slack_dry_run": slack_dry_run,
-<<<<<<< HEAD
         "create_ticket_live": create_ticket_live,
         "ticket_reason": ticket_reason,
         "confirm_token": confirm_token,
         "idempotency_key": idempotency_key,
-=======
->>>>>>> origin/main
     }
     return app.invoke(initial_state)
 
@@ -185,7 +167,6 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--include-ticket", action="store_true", help="Include Jira draft ticket hook")
     parser.add_argument("--project-key", help="Optional Jira project key override")
-<<<<<<< HEAD
     parser.add_argument(
         "--create-ticket-live",
         action="store_true",
@@ -203,8 +184,6 @@ def _build_parser() -> argparse.ArgumentParser:
         "--idempotency-key",
         help="Optional idempotency key for live ticket creation.",
     )
-=======
->>>>>>> origin/main
     parser.add_argument("--notify-slack", action="store_true", help="Send Slack update via webhook tool")
     parser.add_argument("--slack-channel", help="Slack channel override (e.g. #incident-triage)")
     parser.add_argument(
@@ -219,15 +198,12 @@ def _build_parser() -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None) -> int:
     parser = _build_parser()
     args = parser.parse_args(argv)
-<<<<<<< HEAD
     confirm_token = args.confirm_token or os.getenv("CONFIRM_TOKEN")
 
     if args.create_ticket_live and not args.ticket_reason:
         parser.error("--ticket-reason is required when --create-ticket-live is set.")
     if args.create_ticket_live and not confirm_token:
         parser.error("--confirm-token (or CONFIRM_TOKEN env) is required when --create-ticket-live is set.")
-=======
->>>>>>> origin/main
 
     # Force deterministic local defaults for CLI usage.
     os.environ["ARTIFACT_STORE"] = args.artifact_store
@@ -242,13 +218,10 @@ def main(argv: list[str] | None = None) -> int:
         notify_slack=args.notify_slack,
         slack_channel=args.slack_channel,
         slack_dry_run=not args.slack_live,
-<<<<<<< HEAD
         create_ticket_live=args.create_ticket_live,
         ticket_reason=args.ticket_reason,
         confirm_token=confirm_token,
         idempotency_key=args.idempotency_key,
-=======
->>>>>>> origin/main
     )
 
     payload = {
