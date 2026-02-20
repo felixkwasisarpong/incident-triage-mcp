@@ -93,7 +93,29 @@ JIRA_API_TOKEN=***
 pip install -e .
 
 # stdio transport (for Claude Desktop)
-MCP_TRANSPORT=stdio python -m incident_triage_mcp.server
+MCP_TRANSPORT=stdio incident-triage-mcp
+```
+
+### Packaging entrypoints (pip + docker)
+
+Pip console scripts:
+
+```bash
+# MCP server
+incident-triage-mcp
+
+# Local LangGraph runner
+incident-triage-agent --incident-id INC-123 --service payments-api --artifact-store fs --artifact-dir ./evidence
+```
+
+Docker image entrypoint:
+
+```bash
+# Default: starts MCP server (streamable-http on :3333)
+docker run --rm -p 3333:3333 incident-triage-mcp:latest
+
+# Override command: runs via uv in-project env
+docker run --rm incident-triage-mcp:latest incident-triage-agent --incident-id INC-123 --service payments-api
 ```
 
 ### 2) Key environment variables
