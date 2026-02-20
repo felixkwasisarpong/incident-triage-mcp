@@ -150,8 +150,8 @@ ARTIFACT_STORE=fs|s3
 
 # Airflow API (required only when EVIDENCE_BACKEND=airflow)
 AIRFLOW_BASE_URL=http://localhost:8080
-AIRFLOW_USERNAME=admin
-AIRFLOW_PASSWORD=admin
+AIRFLOW_USERNAME=<airflow-username>
+AIRFLOW_PASSWORD=<airflow-password>
 
 # S3-compatible artifact store (required when EVIDENCE_BACKEND=s3)
 S3_ENDPOINT_URL=http://localhost:9000
@@ -170,6 +170,15 @@ SLACK_DEFAULT_CHANNEL=#incident-triage
 
 # Idempotency storage for ticket create retries
 IDEMPOTENCY_STORE_PATH=./data/jira_idempotency.json
+
+# Adapter provider selection (prod scaffold; defaults are mock)
+ALERTS_PROVIDER=mock|datadog|cloudwatch
+METRICS_PROVIDER=mock|datadog|cloudwatch
+LOGS_PROVIDER=mock|datadog|cloudwatch|elk|none
+TRACES_PROVIDER=mock|datadog|cloudwatch|xray|otel|none
+
+# Secrets loader
+SECRET_PROVIDER=env|secret-manager
 ```
 
 ---

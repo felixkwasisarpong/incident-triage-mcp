@@ -9,9 +9,10 @@ from typing import Any
 import requests
 from mcp.server.fastmcp import FastMCP
 
-from incident_triage_mcp.adapters.datadog_mock import DatadogMock
 from incident_triage_mcp.adapters.idempotency_store import FileIdempotencyStore
 from incident_triage_mcp.adapters.jira_provider import get_provider, provider_name
+from incident_triage_mcp.adapters.registry import build_observability_registry
+from incident_triage_mcp.adapters.resilience import ResilienceError, ResiliencePolicy
 from incident_triage_mcp.adapters.runbooks_local import RunbooksLocal
 from incident_triage_mcp.adapters.artifacts_s3 import read_evidence_bundle
 from incident_triage_mcp.audit import AuditLog
@@ -25,6 +26,7 @@ from incident_triage_mcp.tools.jira_draft import build_jira_draft
 from incident_triage_mcp.tools.runbooks import search_runbooks as search_local_runbooks
 from incident_triage_mcp.tools.triage import build_triage_summary
 from incident_triage_mcp.tools.waiter import wait_for
+from incident_triage_mcp.secrets.loader import SecretsError, get_secrets_loader
 
 
 class _NoopIdempotencyStore:
@@ -40,11 +42,32 @@ try:
 except ConfigError as e:
     raise SystemExit(f"[config] {e}") from e
 
+try:
+    SECRETS = get_secrets_loader()
+except SecretsError as e:
+    raise SystemExit(f"[secrets] {e}") from e
+
 _mcp_host = os.getenv("MCP_HOST", CFG.mcp_host or "127.0.0.1")
 _mcp_port = int(os.getenv("MCP_PORT", str(CFG.mcp_port or 8000)))
 mcp = FastMCP("Incident Triage MCP", json_response=True, host=_mcp_host, port=_mcp_port)
 audit = AuditLog()
-datadog = DatadogMock()
+observability = build_observability_registry(
+    alerts_provider=CFG.alerts_provider,
+    metrics_provider=CFG.metrics_provider,
+    logs_provider=CFG.logs_provider,
+    traces_provider=CFG.traces_provider,
+    secrets=SECRETS,
+    resilience_policy=ResiliencePolicy(
+        timeout_seconds=CFG.adapter_timeout_seconds,
+        retries=CFG.adapter_retries,
+        base_backoff_seconds=CFG.adapter_backoff_seconds,
+        max_backoff_seconds=CFG.adapter_max_backoff_seconds,
+        circuit_failure_threshold=CFG.adapter_circuit_failure_threshold,
+        circuit_open_seconds=CFG.adapter_circuit_open_seconds,
+    ),
+)
+# Backward-compatible test hook; currently points at alerts provider adapter.
+datadog = observability.alerts_adapter
 runbooks = RunbooksLocal()
 
 
@@ -297,7 +320,17 @@ def alerts_fetch_active(services: list[str] = None, since_minutes: int = 30, max
     args = {"services": services, "since_minutes": since_minutes, "max_alerts": max_alerts}
     corr = audit.write("alerts.fetch_active", args, ok=True)
 
-    alerts = datadog.fetch_active_alerts(services, since_minutes, max_alerts)
+    try:
+        alerts = observability.fetch_active_alerts(services, since_minutes, max_alerts)
+    except ResilienceError as e:
+        audit.write("alerts.fetch_active.error", {"error": e.to_dict()}, ok=False)
+        return {
+            "correlation_id": corr,
+            "alerts": [],
+            "grouping": {"by_service": {}},
+            "error": e.to_dict(),
+        }
+
     by_service: dict[str, list[str]] = {}
     for a in alerts:
         by_service.setdefault(a["service"], []).append(a["alert_id"])
@@ -310,7 +343,12 @@ def service_health_snapshot(service: str, start_iso: str, end_iso: str) -> dict:
     args = {"service": service, "start_iso": start_iso, "end_iso": end_iso}
     corr = audit.write("service.health_snapshot", args, ok=True)
 
-    snap = datadog.health_snapshot(service, start_iso, end_iso)
+    try:
+        snap = observability.health_snapshot(service, start_iso, end_iso)
+    except ResilienceError as e:
+        audit.write("service.health_snapshot.error", {"error": e.to_dict()}, ok=False)
+        return {"correlation_id": corr, "snapshot": {}, "error": e.to_dict()}
+
     return {"correlation_id": corr, "snapshot": snap}
 
 
@@ -835,4 +873,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-
