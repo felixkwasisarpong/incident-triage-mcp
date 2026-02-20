@@ -172,8 +172,8 @@ SLACK_DEFAULT_CHANNEL=#incident-triage
 IDEMPOTENCY_STORE_PATH=./data/jira_idempotency.json
 
 # Adapter provider selection (prod scaffold; defaults are mock)
-ALERTS_PROVIDER=mock|datadog|cloudwatch
-METRICS_PROVIDER=mock|datadog|cloudwatch
+ALERTS_PROVIDER=mock|datadog|cloudwatch|prometheus
+METRICS_PROVIDER=mock|datadog|cloudwatch|prometheus
 LOGS_PROVIDER=mock|datadog|cloudwatch|elk|none
 TRACES_PROVIDER=mock|datadog|cloudwatch|xray|otel|none
 
@@ -193,6 +193,17 @@ CLOUDWATCH_ERROR_RATE_METRIC=ErrorRate
 CLOUDWATCH_LATENCY_P95_METRIC=LatencyP95
 CLOUDWATCH_RPS_METRIC=RequestsPerSecond
 CLOUDWATCH_PERIOD_SECONDS=60
+
+# Prometheus settings (used when ALERTS_PROVIDER or METRICS_PROVIDER is prometheus)
+PROMETHEUS_BASE_URL=http://localhost:9090
+PROMETHEUS_BEARER_TOKEN=<optional-bearer-token>
+PROMETHEUS_USERNAME=<optional-basic-auth-username>
+PROMETHEUS_PASSWORD=<optional-basic-auth-password>
+PROMETHEUS_SERVICE_LABEL=service
+PROMETHEUS_QUERY_STEP_SECONDS=60
+PROMETHEUS_ERROR_RATE_QUERY=sum(rate(http_server_errors_total{service="{service}"}[5m])) / clamp_min(sum(rate(http_server_requests_total{service="{service}"}[5m])), 1)
+PROMETHEUS_LATENCY_P95_MS_QUERY=histogram_quantile(0.95, sum(rate(http_server_request_duration_seconds_bucket{service="{service}"}[5m])) by (le)) * 1000
+PROMETHEUS_RPS_QUERY=sum(rate(http_server_requests_total{service="{service}"}[5m]))
 
 # Secrets loader
 SECRET_PROVIDER=env|secret-manager
