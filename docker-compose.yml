@@ -100,6 +100,7 @@ services:
     container_name: it_mcp
     environment:
 
+      EVIDENCE_BACKEND: s3
       ARTIFACT_STORE: s3
       S3_ENDPOINT_URL: http://minio:9000
       S3_BUCKET: triage-artifacts
@@ -136,6 +137,38 @@ services:
     depends_on:
       airflow-webserver:
         condition: service_started
+
+  incident-triage-mcp-standalone:
+    profiles: ["standalone"]
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: it_mcp_standalone
+    environment:
+      MCP_TRANSPORT: streamable-http
+      MCP_HOST: 0.0.0.0
+      MCP_PORT: "3333"
+      AUDIT_PATH: /data/audit.jsonl
+      EVIDENCE_BACKEND: fs
+      EVIDENCE_DIR: /evidence
+      MCP_ROLE: ${MCP_ROLE:-viewer}
+      CONFIRM_TOKEN: ${CONFIRM_TOKEN:-}
+      JIRA_PROVIDER: ${JIRA_PROVIDER:-mock}
+      JIRA_BASE_URL: ${JIRA_BASE_URL:-}
+      JIRA_EMAIL: ${JIRA_EMAIL:-}
+      JIRA_API_TOKEN: ${JIRA_API_TOKEN:-}
+      JIRA_PROJECT_KEY: ${JIRA_PROJECT_KEY:-INC}
+      JIRA_ISSUE_TYPE: ${JIRA_ISSUE_TYPE:-Task}
+      SLACK_WEBHOOK_URL: ${SLACK_WEBHOOK_URL:-}
+      SLACK_DEFAULT_CHANNEL: ${SLACK_DEFAULT_CHANNEL:-}
+      IDEMPOTENCY_STORE_PATH: ${IDEMPOTENCY_STORE_PATH:-/data/jira_idempotency.json}
+      RUNBOOKS_DIR: /runbooks
+    volumes:
+      - ./data:/data
+      - ./evidence:/evidence
+      - ./runbooks:/runbooks:ro
+    ports:
+      - "3334:3333"
 
 
   minio:

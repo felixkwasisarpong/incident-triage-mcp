@@ -34,7 +34,6 @@ It exposes structured, auditable triage tools (evidence collection, runbook sear
 - **Safe ticketing:** draft Jira tickets + gated create (dry-run by default, RBAC + confirm token)
 - **Real idempotency for creates:** reusing `idempotency_key` returns the existing issue
 - **Slack updates:** post incident summary + ticket context (safe dry-run by default)
-- **Slack updates:** post incident summary + ticket context (safe dry-run by default)
 - **Jira discovery tools:** list accessible projects and project-specific issue types (read-only)
 - **Jira Cloud rich text:** draft content renders as clean ADF (H2 section headings + bullet lists + inline bold/code)
 - **Demo-friendly tools:** `evidence.wait_for_bundle` and deterministic `incident.triage_summary`
@@ -109,24 +108,28 @@ MCP_PORT=3333
 AUDIT_MODE=stdout|file         # default: stdout
 AUDIT_PATH=/data/audit.jsonl   # only used when AUDIT_MODE=file
 
-# Airflow API (optional; used for workflow-trigger tools)
+# Local runbooks (real data source, no creds)
+RUNBOOKS_DIR=./runbooks
+
+# Evidence backend (standalone-first)
+#   fs      -> read/write local Evidence Bundle JSON files
+#   s3      -> read/write via S3 API (MinIO/S3)
+#   airflow -> expose airflow_* tools (requires Airflow env vars)
+#   none    -> disable evidence reads entirely
+EVIDENCE_BACKEND=fs|s3|airflow|none
+
+# Local evidence directory for fs backend
+EVIDENCE_DIR=./evidence
+
+# Legacy alias still supported (maps to fs|s3 when EVIDENCE_BACKEND is unset)
+ARTIFACT_STORE=fs|s3
+
+# Airflow API (required only when EVIDENCE_BACKEND=airflow)
 AIRFLOW_BASE_URL=http://localhost:8080
 AIRFLOW_USERNAME=admin
 AIRFLOW_PASSWORD=admin
 
-# Local runbooks (real data source, no creds)
-RUNBOOKS_DIR=./runbooks
-
-# Evidence artifacts (when reading local artifacts)
-AIRFLOW_ARTIFACT_DIR=./airflow/artifacts
-
-# Evidence artifacts (recommended for Docker/K8s)
-# Choose storage backend:
-#   ARTIFACT_STORE=fs  -> read/write local filesystem artifacts (fast local dev)
-#   ARTIFACT_STORE=s3  -> read/write via S3 API (MinIO locally, S3 in cloud)
-ARTIFACT_STORE=fs|s3
-
-# S3-compatible artifact store (required when ARTIFACT_STORE=s3)
+# S3-compatible artifact store (required when EVIDENCE_BACKEND=s3)
 S3_ENDPOINT_URL=http://localhost:9000
 S3_BUCKET=triage-artifacts
 S3_REGION=us-east-1
@@ -141,12 +144,43 @@ JIRA_ISSUE_TYPE=Task
 SLACK_WEBHOOK_URL=https://hooks.slack.com/services/...
 SLACK_DEFAULT_CHANNEL=#incident-triage
 
-# Slack notifications
-SLACK_WEBHOOK_URL=https://hooks.slack.com/services/...
-SLACK_DEFAULT_CHANNEL=#incident-triage
-
 # Idempotency storage for ticket create retries
 IDEMPOTENCY_STORE_PATH=./data/jira_idempotency.json
+```
+
+---
+
+## Standalone Mode (No Airflow)
+
+Boot MCP standalone with only stdio + local runbooks:
+
+```bash
+MCP_TRANSPORT=stdio \
+RUNBOOKS_DIR=./runbooks \
+EVIDENCE_BACKEND=fs \
+EVIDENCE_DIR=./evidence \
+incident-triage-mcp
+```
+
+Offline demo flow (no Airflow required):
+
+1. Seed deterministic evidence:
+   - `evidence_seed_sample(incident_id="INC-123", service="payments-api", window_minutes=30)`
+2. Summarize incident:
+   - `incident_triage_summary(incident_id="INC-123")`
+3. Draft Jira ticket from local evidence:
+   - `jira_draft_ticket(incident_id="INC-123")`
+
+Notes:
+- `airflow_*` tools are only registered when `EVIDENCE_BACKEND=airflow`.
+- If `EVIDENCE_BACKEND=airflow` but Airflow env vars are missing, server still starts and Airflow tool calls return a clear `airflow_disabled` error.
+
+Quick verification tests:
+
+```bash
+# standalone behavior (no airflow required)
+UV_CACHE_DIR=.uv-cache /opt/anaconda3/bin/uv run --project . \
+  python -m unittest tests.test_standalone_mode -v
 ```
 
 ---
@@ -190,6 +224,15 @@ docker run --rm --network incident-triage-mcp_default \
   -e MC_HOST_local=http://minioadmin:minioadmin@minio:9000 \
   minio/mc:latest ls local/triage-artifacts/evidence/v1/
 ```
+
+Standalone Docker mode (no Airflow, no MinIO):
+
+```bash
+mkdir -p data evidence runbooks
+docker compose --profile standalone up --build incident-triage-mcp-standalone
+```
+
+- MCP endpoint: `http://localhost:3334`
 
 ---
 
