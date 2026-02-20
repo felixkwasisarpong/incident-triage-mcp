@@ -7,6 +7,7 @@ from incident_triage_mcp.adapters.cloudwatch_real import CloudWatchAPI
 from incident_triage_mcp.adapters.contracts import AlertsProvider, MetricsProvider, ObservabilityAdapter
 from incident_triage_mcp.adapters.datadog_mock import DatadogMock
 from incident_triage_mcp.adapters.datadog_real import DatadogAPI
+from incident_triage_mcp.adapters.prometheus_real import PrometheusAPI
 from incident_triage_mcp.adapters.resilience import ResiliencePolicy, ResilienceRunner
 from incident_triage_mcp.secrets.loader import SecretsLoader
 
@@ -52,6 +53,7 @@ def _register_builtin_providers() -> None:
     register_observability_provider("mock", lambda _secrets: DatadogMock())
     register_observability_provider("datadog", lambda secrets: DatadogAPI(secrets))
     register_observability_provider("cloudwatch", lambda secrets: CloudWatchAPI(secrets))
+    register_observability_provider("prometheus", lambda secrets: PrometheusAPI(secrets))
 
 
 @dataclass
