@@ -5,6 +5,7 @@ from typing import Any, Callable
 
 from incident_triage_mcp.adapters.contracts import AlertsProvider, MetricsProvider, ObservabilityAdapter
 from incident_triage_mcp.adapters.datadog_mock import DatadogMock
+from incident_triage_mcp.adapters.datadog_real import DatadogAPI
 from incident_triage_mcp.adapters.resilience import ResiliencePolicy, ResilienceRunner
 from incident_triage_mcp.secrets.loader import SecretsLoader
 
@@ -48,7 +49,7 @@ def _register_builtin_providers() -> None:
     if _OBSERVABILITY_PROVIDERS:
         return
     register_observability_provider("mock", lambda _secrets: DatadogMock())
-    register_observability_provider("datadog", lambda _secrets: _UnimplementedObservabilityAdapter("datadog"))
+    register_observability_provider("datadog", lambda secrets: DatadogAPI(secrets))
     register_observability_provider("cloudwatch", lambda _secrets: _UnimplementedObservabilityAdapter("cloudwatch"))
 
 

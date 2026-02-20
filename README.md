@@ -177,6 +177,11 @@ METRICS_PROVIDER=mock|datadog|cloudwatch
 LOGS_PROVIDER=mock|datadog|cloudwatch|elk|none
 TRACES_PROVIDER=mock|datadog|cloudwatch|xray|otel|none
 
+# Datadog credentials (required when ALERTS_PROVIDER or METRICS_PROVIDER is datadog)
+DATADOG_API_KEY=<datadog-api-key>
+DATADOG_APP_KEY=<datadog-application-key>
+DATADOG_SITE=datadoghq.com
+
 # Secrets loader
 SECRET_PROVIDER=env|secret-manager
 ```
