@@ -277,6 +277,34 @@ The suite currently covers all MCP tools defined in `src/incident_triage_mcp/ser
 
 ---
 
+## Automated Releases
+
+This repo supports automated tag-based release publishing for both PyPI and GHCR.
+
+Release workflow:
+- Trigger: push a Git tag like `v0.2.0`
+- Publishes:
+  - Python package to PyPI
+  - Docker image to `ghcr.io/<owner>/incident-triage-mcp`
+  - GitHub Release with generated notes
+
+Required repository secret:
+- `PYPI_API_TOKEN` (PyPI API token with publish permission)
+
+Release command:
+
+```bash
+# 1) bump version in pyproject.toml first, then:
+git tag v0.2.0
+git push origin v0.2.0
+```
+
+Notes:
+- The workflow validates that tag `vX.Y.Z` matches `project.version` in `pyproject.toml`.
+- GHCR publish uses the built-in `GITHUB_TOKEN`.
+
+---
+
 ## Evidence Bundle workflow
 
 **Airflow produces** a single artifact per incident:
