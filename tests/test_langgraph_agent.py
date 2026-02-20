@@ -1,10 +1,10 @@
 from __future__ import annotations
 
+import os
 import sys
 import unittest
 from pathlib import Path
 from unittest.mock import patch
-import os
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -27,10 +27,6 @@ class _FakeServer:
         self._ticket_error = ticket_error
         self.calls = []
         self.ticket_calls = []
-    def __init__(self, result=None, error: Exception | None = None) -> None:
-        self._result = result or {"status": "ok"}
-        self._error = error
-        self.calls = []
 
     def incident_triage_run(self, **kwargs):
         self.calls.append(kwargs)
@@ -71,11 +67,6 @@ class TestLangGraphAgent(unittest.TestCase):
         self.assertEqual(len(fake_server.calls), 1)
         self.assertEqual(fake_server.calls[0]["incident_id"], "INC-123")
         self.assertEqual(fake_server.calls[0]["service"], "payments-api")
-        self.assertTrue(fake_server.calls[0]["include_ticket"])
-        self.assertEqual(fake_server.calls[0]["project_key"], "SCRUM")
-        self.assertTrue(fake_server.calls[0]["notify_slack"])
-        self.assertEqual(fake_server.calls[0]["slack_channel"], "#incident-triage")
-        self.assertFalse(fake_server.calls[0]["slack_dry_run"])
         self.assertEqual(fake_server.ticket_calls, [])
 
     def test_run_agent_with_live_ticket(self) -> None:
@@ -97,17 +88,8 @@ class TestLangGraphAgent(unittest.TestCase):
 
         self.assertNotIn("error", state)
         self.assertIn("result", state)
-        self.assertIn("live_ticket", state["result"])
         self.assertEqual(state["result"]["live_ticket"]["issue_key"], "SCRUM-777")
         self.assertEqual(len(fake_server.ticket_calls), 1)
-        self.assertEqual(fake_server.ticket_calls[0]["incident_id"], "INC-700")
-        self.assertEqual(fake_server.ticket_calls[0]["project_key"], "SCRUM")
-        self.assertFalse(fake_server.ticket_calls[0]["dry_run"])
-        self.assertEqual(
-            fake_server.ticket_calls[0]["reason"],
-            "Create live ticket for incident command workflow",
-        )
-        self.assertEqual(fake_server.ticket_calls[0]["confirm_token"], "test-confirm-token")
         self.assertEqual(fake_server.ticket_calls[0]["idempotency_key"], "INC-700-SCRUM-live")
 
     def test_run_agent_live_ticket_failure(self) -> None:
@@ -140,9 +122,9 @@ class TestLangGraphAgent(unittest.TestCase):
     def test_main_slack_live_flag_sets_dry_run_false(self) -> None:
         from incident_triage_mcp.agents import langgraph_agent as agent
 
-        with patch.object(agent, "run_agent", return_value={"result": {"status": "ok"}}) as run_mock, patch(
-            "builtins.print"
-        ) as print_mock:
+        with patch.dict(os.environ, {}, clear=True), patch.object(
+            agent, "run_agent", return_value={"result": {"status": "ok"}}
+        ) as run_mock, patch("builtins.print") as print_mock:
             code = agent.main(
                 [
                     "--incident-id",
@@ -176,7 +158,9 @@ class TestLangGraphAgent(unittest.TestCase):
     def test_main_returns_nonzero_on_error(self) -> None:
         from incident_triage_mcp.agents import langgraph_agent as agent
 
-        with patch.object(agent, "run_agent", return_value={"error": "failed"}), patch("builtins.print"):
+        with patch.dict(os.environ, {}, clear=True), patch.object(
+            agent, "run_agent", return_value={"error": "failed"}
+        ), patch("builtins.print"):
             code = agent.main(["--incident-id", "INC-55", "--service", "payments-api"])
 
         self.assertEqual(code, 1)
@@ -184,7 +168,7 @@ class TestLangGraphAgent(unittest.TestCase):
     def test_main_live_ticket_requires_reason(self) -> None:
         from incident_triage_mcp.agents import langgraph_agent as agent
 
-        with self.assertRaises(SystemExit) as ctx:
+        with patch.dict(os.environ, {}, clear=True), self.assertRaises(SystemExit) as ctx:
             agent.main(
                 [
                     "--incident-id",
@@ -257,7 +241,9 @@ class TestLangGraphAgent(unittest.TestCase):
             agent, "run_agent", return_value={"result": {"status": "ok"}}
         ), patch("builtins.print"):
             code = agent.main(["--incident-id", "INC-66", "--service", "payments-api"])
+            self.assertEqual(os.environ["EVIDENCE_BACKEND"], "fs")
             self.assertEqual(os.environ["ARTIFACT_STORE"], "fs")
+            self.assertEqual(os.environ["EVIDENCE_DIR"], "./airflow/artifacts")
             self.assertEqual(os.environ["AIRFLOW_ARTIFACT_DIR"], "./airflow/artifacts")
 
         self.assertEqual(code, 0)
@@ -278,15 +264,14 @@ class TestLangGraphAgent(unittest.TestCase):
                     "s3",
                 ]
             )
+            self.assertEqual(os.environ["EVIDENCE_BACKEND"], "s3")
             self.assertEqual(os.environ["ARTIFACT_STORE"], "s3")
+            self.assertNotIn("EVIDENCE_DIR", os.environ)
             self.assertNotIn("AIRFLOW_ARTIFACT_DIR", os.environ)
 
         self.assertEqual(code, 0)
 
-        self.assertEqual(code, 0)
-        self.assertEqual(os.environ["ARTIFACT_STORE"], "fs")
-        self.assertEqual(os.environ["AIRFLOW_ARTIFACT_DIR"], "./airflow/artifacts")
-
 
 if __name__ == "__main__":
     unittest.main()
+

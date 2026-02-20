@@ -86,6 +86,8 @@ class TestServerTools(unittest.TestCase):
             {
                 "MCP_TRANSPORT": "stdio",
                 "MCP_PORT": "3333",
+                "EVIDENCE_BACKEND": "fs",
+                "EVIDENCE_DIR": self.tmpdir.name,
                 "ARTIFACT_STORE": "fs",
                 "AIRFLOW_ARTIFACT_DIR": self.tmpdir.name,
                 "RUNBOOKS_DIR": self.tmpdir.name,
@@ -364,6 +366,7 @@ class TestServerTools(unittest.TestCase):
         with patch.dict(
             os.environ,
             {
+                "EVIDENCE_BACKEND": "s3",
                 "ARTIFACT_STORE": "s3",
                 "S3_ENDPOINT_URL": "http://localhost:9000",
                 "S3_BUCKET": "triage-artifacts",
@@ -394,6 +397,7 @@ class TestServerTools(unittest.TestCase):
         with patch.dict(
             os.environ,
             {
+                "EVIDENCE_BACKEND": "s3",
                 "ARTIFACT_STORE": "s3",
                 "S3_ENDPOINT_URL": "http://localhost:9000",
                 "S3_BUCKET": "triage-artifacts",
