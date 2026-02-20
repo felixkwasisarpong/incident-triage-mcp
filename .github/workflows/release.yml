@@ -26,12 +26,12 @@ jobs:
           TAG="${GITHUB_REF_NAME}"
           VERSION="$(python - <<'PY'
           from pathlib import Path
-          import re
-          text = Path("pyproject.toml").read_text(encoding="utf-8")
-          match = re.search(r'(?m)^version\\s*=\\s*"([^"]+)"', text)
-          if not match:
+          import tomllib
+          data = tomllib.loads(Path("pyproject.toml").read_text(encoding="utf-8"))
+          version = data.get("project", {}).get("version")
+          if not version:
               raise SystemExit("Could not find project version in pyproject.toml")
-          print(match.group(1))
+          print(version)
           PY
           )"
           if [ "v${VERSION}" != "${TAG}" ]; then
