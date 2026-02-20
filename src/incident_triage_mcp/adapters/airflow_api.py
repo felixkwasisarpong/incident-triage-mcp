@@ -6,8 +6,12 @@ import requests
 class AirflowAPI:
     def __init__(self, base_url: str) -> None:
         self.base_url = base_url.rstrip("/")
-        self.username = os.getenv("AIRFLOW_USERNAME", "admin")
-        self.password = os.getenv("AIRFLOW_PASSWORD", "admin")
+        self.username = os.getenv("AIRFLOW_USERNAME")
+        self.password = os.getenv("AIRFLOW_PASSWORD")
+        if not self.username or not self.password:
+            raise RuntimeError(
+                "Missing Airflow credentials. Set AIRFLOW_USERNAME and AIRFLOW_PASSWORD."
+            )
         self.auth = (self.username, self.password)
 
     def trigger_dag(self, dag_id: str, conf: Dict[str, Any]) -> Dict[str, Any]:

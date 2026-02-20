@@ -46,6 +46,20 @@ class AppConfig:
     airflow_username: Optional[str]
     airflow_password: Optional[str]
 
+    # Adapter providers
+    alerts_provider: str
+    metrics_provider: str
+    logs_provider: str
+    traces_provider: str
+
+    # Adapter resilience
+    adapter_timeout_seconds: float
+    adapter_retries: int
+    adapter_backoff_seconds: float
+    adapter_max_backoff_seconds: float
+    adapter_circuit_failure_threshold: int
+    adapter_circuit_open_seconds: float
+
     # Runbooks
     runbooks_dir: str
 
@@ -75,6 +89,22 @@ def load_config() -> AppConfig:
         airflow_username=_env("AIRFLOW_USERNAME"),
         airflow_password=_env("AIRFLOW_PASSWORD"),
 
+        alerts_provider=(_env("ALERTS_PROVIDER", "mock") or "mock").lower(),
+        metrics_provider=(_env("METRICS_PROVIDER", "mock") or "mock").lower(),
+        logs_provider=(_env("LOGS_PROVIDER", "mock") or "mock").lower(),
+        traces_provider=(_env("TRACES_PROVIDER", "mock") or "mock").lower(),
+
+        adapter_timeout_seconds=float(_env("ADAPTER_TIMEOUT_SECONDS", "5.0") or "5.0"),
+        adapter_retries=int(_env("ADAPTER_RETRIES", "1") or "1"),
+        adapter_backoff_seconds=float(_env("ADAPTER_BACKOFF_SECONDS", "0.15") or "0.15"),
+        adapter_max_backoff_seconds=float(_env("ADAPTER_MAX_BACKOFF_SECONDS", "1.0") or "1.0"),
+        adapter_circuit_failure_threshold=int(
+            _env("ADAPTER_CIRCUIT_FAILURE_THRESHOLD", "3") or "3"
+        ),
+        adapter_circuit_open_seconds=float(
+            _env("ADAPTER_CIRCUIT_OPEN_SECONDS", "10.0") or "10.0"
+        ),
+
         runbooks_dir=_env("RUNBOOKS_DIR", "./runbooks") or "./runbooks",
     )
 
@@ -85,6 +115,35 @@ def load_config() -> AppConfig:
     # Validate evidence backend mode
     if cfg.evidence_backend not in {"none", "fs", "s3", "airflow"}:
         raise ConfigError("EVIDENCE_BACKEND must be one of: none, fs, s3, airflow")
+
+    # Validate provider flags
+    provider_sets = {
+        "ALERTS_PROVIDER": (cfg.alerts_provider, {"mock", "datadog", "cloudwatch"}),
+        "METRICS_PROVIDER": (cfg.metrics_provider, {"mock", "datadog", "cloudwatch"}),
+        "LOGS_PROVIDER": (cfg.logs_provider, {"mock", "datadog", "cloudwatch", "elk", "none"}),
+        "TRACES_PROVIDER": (
+            cfg.traces_provider,
+            {"mock", "datadog", "cloudwatch", "xray", "otel", "none"},
+        ),
+    }
+    for env_name, (value, allowed) in provider_sets.items():
+        if value not in allowed:
+            allowed_str = ", ".join(sorted(allowed))
+            raise ConfigError(f"{env_name} must be one of: {allowed_str}")
+
+    # Validate resilience settings
+    if cfg.adapter_timeout_seconds <= 0:
+        raise ConfigError("ADAPTER_TIMEOUT_SECONDS must be > 0")
+    if cfg.adapter_retries < 0:
+        raise ConfigError("ADAPTER_RETRIES must be >= 0")
+    if cfg.adapter_backoff_seconds < 0:
+        raise ConfigError("ADAPTER_BACKOFF_SECONDS must be >= 0")
+    if cfg.adapter_max_backoff_seconds <= 0:
+        raise ConfigError("ADAPTER_MAX_BACKOFF_SECONDS must be > 0")
+    if cfg.adapter_circuit_failure_threshold <= 0:
+        raise ConfigError("ADAPTER_CIRCUIT_FAILURE_THRESHOLD must be > 0")
+    if cfg.adapter_circuit_open_seconds < 0:
+        raise ConfigError("ADAPTER_CIRCUIT_OPEN_SECONDS must be >= 0")
 
     # Validate artifacts for S3 backend only
     if cfg.evidence_backend == "s3":
