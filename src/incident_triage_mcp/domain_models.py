@@ -17,7 +17,7 @@ class Signal(BaseModel):
 
 class Alert(BaseModel):
     alert_id: str
-    provider: Literal["datadog", "cloudwatch", "prometheus", "mock", "other"] = "mock"
+    provider: Literal["datadog", "cloudwatch", "prometheus", "pagerduty", "mock", "other"] = "mock"
     service: str
     name: str
     status: Literal["triggered", "warning", "resolved"] = "triggered"

@@ -172,7 +172,7 @@ SLACK_DEFAULT_CHANNEL=#incident-triage
 IDEMPOTENCY_STORE_PATH=./data/jira_idempotency.json
 
 # Adapter provider selection (prod scaffold; defaults are mock)
-ALERTS_PROVIDER=mock|datadog|cloudwatch|prometheus
+ALERTS_PROVIDER=mock|datadog|cloudwatch|prometheus|pagerduty
 METRICS_PROVIDER=mock|datadog|cloudwatch|prometheus
 LOGS_PROVIDER=mock|datadog|cloudwatch|elk|none
 TRACES_PROVIDER=mock|datadog|cloudwatch|xray|otel|none
@@ -204,6 +204,11 @@ PROMETHEUS_QUERY_STEP_SECONDS=60
 PROMETHEUS_ERROR_RATE_QUERY=sum(rate(http_server_errors_total{service="{service}"}[5m])) / clamp_min(sum(rate(http_server_requests_total{service="{service}"}[5m])), 1)
 PROMETHEUS_LATENCY_P95_MS_QUERY=histogram_quantile(0.95, sum(rate(http_server_request_duration_seconds_bucket{service="{service}"}[5m])) by (le)) * 1000
 PROMETHEUS_RPS_QUERY=sum(rate(http_server_requests_total{service="{service}"}[5m]))
+
+# PagerDuty settings (used when ALERTS_PROVIDER=pagerduty)
+PAGERDUTY_API_TOKEN=<pagerduty-rest-api-token>
+PAGERDUTY_BASE_URL=https://api.pagerduty.com
+PAGERDUTY_HTTP_TIMEOUT_SECONDS=10
 
 # Secrets loader
 SECRET_PROVIDER=env|secret-manager

@@ -118,7 +118,10 @@ def load_config() -> AppConfig:
 
     # Validate provider flags
     provider_sets = {
-        "ALERTS_PROVIDER": (cfg.alerts_provider, {"mock", "datadog", "cloudwatch", "prometheus"}),
+        "ALERTS_PROVIDER": (
+            cfg.alerts_provider,
+            {"mock", "datadog", "cloudwatch", "prometheus", "pagerduty"},
+        ),
         "METRICS_PROVIDER": (cfg.metrics_provider, {"mock", "datadog", "cloudwatch", "prometheus"}),
         "LOGS_PROVIDER": (cfg.logs_provider, {"mock", "datadog", "cloudwatch", "elk", "none"}),
         "TRACES_PROVIDER": (
