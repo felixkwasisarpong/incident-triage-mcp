@@ -47,7 +47,7 @@ class TestAdapterScaffold(unittest.TestCase):
 
     def test_registry_unimplemented_provider_returns_normalized_error(self) -> None:
         registry = build_observability_registry(
-            alerts_provider="cloudwatch",
+            alerts_provider="newrelic",
             metrics_provider="mock",
             logs_provider="mock",
             traces_provider="mock",
@@ -59,7 +59,7 @@ class TestAdapterScaffold(unittest.TestCase):
             registry.fetch_active_alerts(["payments-api"], since_minutes=30, max_alerts=10)
 
         self.assertEqual(ctx.exception.kind, "adapter_call_failed")
-        self.assertEqual(ctx.exception.provider, "cloudwatch")
+        self.assertEqual(ctx.exception.provider, "newrelic")
         self.assertIn("not implemented", str(ctx.exception.cause))
 
     def test_resilience_runner_opens_circuit_after_threshold(self) -> None:

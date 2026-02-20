@@ -182,6 +182,18 @@ DATADOG_API_KEY=<datadog-api-key>
 DATADOG_APP_KEY=<datadog-application-key>
 DATADOG_SITE=datadoghq.com
 
+# CloudWatch settings (used when ALERTS_PROVIDER or METRICS_PROVIDER is cloudwatch)
+# Auth can come from env credentials below or IAM role/default AWS credential chain.
+AWS_REGION=us-east-1
+AWS_ACCESS_KEY_ID=<optional-static-key>
+AWS_SECRET_ACCESS_KEY=<optional-static-secret>
+CLOUDWATCH_NAMESPACE=IncidentTriage
+CLOUDWATCH_DIMENSION_NAME=Service
+CLOUDWATCH_ERROR_RATE_METRIC=ErrorRate
+CLOUDWATCH_LATENCY_P95_METRIC=LatencyP95
+CLOUDWATCH_RPS_METRIC=RequestsPerSecond
+CLOUDWATCH_PERIOD_SECONDS=60
+
 # Secrets loader
 SECRET_PROVIDER=env|secret-manager
 ```

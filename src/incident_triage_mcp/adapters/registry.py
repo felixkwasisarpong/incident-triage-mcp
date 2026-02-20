@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Callable
 
+from incident_triage_mcp.adapters.cloudwatch_real import CloudWatchAPI
 from incident_triage_mcp.adapters.contracts import AlertsProvider, MetricsProvider, ObservabilityAdapter
 from incident_triage_mcp.adapters.datadog_mock import DatadogMock
 from incident_triage_mcp.adapters.datadog_real import DatadogAPI
@@ -50,7 +51,7 @@ def _register_builtin_providers() -> None:
         return
     register_observability_provider("mock", lambda _secrets: DatadogMock())
     register_observability_provider("datadog", lambda secrets: DatadogAPI(secrets))
-    register_observability_provider("cloudwatch", lambda _secrets: _UnimplementedObservabilityAdapter("cloudwatch"))
+    register_observability_provider("cloudwatch", lambda secrets: CloudWatchAPI(secrets))
 
 
 @dataclass
