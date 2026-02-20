@@ -5,6 +5,8 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "incident-triage-mcp"
 version = "0.2.3"
+description = "MCP server for evidence-driven incident triage with safe actions, Jira, Slack, and optional Airflow integration."
+readme = {file = "README.md", content-type = "text/markdown"}
 requires-python = ">=3.10"
 dependencies = [
   "mcp[cli]>=1.26.0",
