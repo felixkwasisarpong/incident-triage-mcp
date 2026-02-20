@@ -183,6 +183,12 @@ UV_CACHE_DIR=.uv-cache /opt/anaconda3/bin/uv run --project . \
   python -m unittest tests.test_standalone_mode -v
 ```
 
+One-command standalone smoke check:
+
+```bash
+./scripts/smoke_standalone.sh INC-123 payments-api
+```
+
 ---
 
 ## Docker Compose (Airflow + Postgres + MCP)
