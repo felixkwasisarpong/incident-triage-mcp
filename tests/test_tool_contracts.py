@@ -20,6 +20,7 @@ CORE_TOOLS = {
     "incident_triage_run",
     "alerts_fetch_active",
     "service_health_snapshot",
+    "logs_fetch_recent",
     "runbooks_search",
     "ping",
     "slack_post_update",

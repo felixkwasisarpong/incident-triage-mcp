@@ -45,6 +45,18 @@ class TestAdapterScaffold(unittest.TestCase):
         self.assertGreaterEqual(len(alerts), 1)
         self.assertEqual(snapshot["service"], "payments-api")
 
+    def test_registry_logs_provider_none_returns_empty_list(self) -> None:
+        registry = build_observability_registry(
+            alerts_provider="mock",
+            metrics_provider="mock",
+            logs_provider="none",
+            traces_provider="none",
+            secrets=EnvSecretsLoader(),
+        )
+
+        logs = registry.fetch_logs("payments-api", "2026-01-01T00:00:00Z", "2026-01-01T00:30:00Z", limit=50)
+        self.assertEqual(logs, [])
+
     def test_registry_unimplemented_provider_returns_normalized_error(self) -> None:
         registry = build_observability_registry(
             alerts_provider="newrelic",

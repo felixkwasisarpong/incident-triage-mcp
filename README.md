@@ -210,6 +210,17 @@ PAGERDUTY_API_TOKEN=<pagerduty-rest-api-token>
 PAGERDUTY_BASE_URL=https://api.pagerduty.com
 PAGERDUTY_HTTP_TIMEOUT_SECONDS=10
 
+# ELK/OpenSearch settings (used when LOGS_PROVIDER=elk)
+ELASTICSEARCH_BASE_URL=http://localhost:9200
+ELASTICSEARCH_LOG_INDEX=logs-*
+ELASTICSEARCH_TIMESTAMP_FIELD=@timestamp
+ELASTICSEARCH_SERVICE_FIELD=service.name
+ELASTICSEARCH_MESSAGE_FIELDS=message,log.original,event.original
+ELASTICSEARCH_API_KEY=<optional-api-key>
+ELASTICSEARCH_USERNAME=<optional-basic-auth-username>
+ELASTICSEARCH_PASSWORD=<optional-basic-auth-password>
+ELASTICSEARCH_HTTP_TIMEOUT_SECONDS=10
+
 # Secrets loader
 SECRET_PROVIDER=env|secret-manager
 ```
@@ -408,6 +419,8 @@ Typical demo sequence:
    - `evidence_wait_for_bundle(incident_id="INC-123", timeout_seconds=90, poll_seconds=2)`
 3) Generate a deterministic triage summary (no LLM required):
    - `incident_triage_summary(incident_id="INC-123")`
+3.5) Optional log pull for the same window:
+   - `logs_fetch_recent(service="payments-api", start_iso="2026-01-01T00:00:00Z", end_iso="2026-01-01T00:30:00Z", limit=50)`
 4) Optional one-call orchestration (safe ticket dry-run hook):
    - `incident_triage_run(incident_id="INC-123", service="payments-api", include_ticket=true)`
    - Override project key for the ticket hook: `incident_triage_run(incident_id="INC-123", service="payments-api", include_ticket=true, project_key="PAY")`

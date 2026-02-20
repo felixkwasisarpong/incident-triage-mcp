@@ -312,6 +312,37 @@ class TestServerTools(unittest.TestCase):
         snap_mock.assert_called_once_with("payments-api", "start", "end")
         self.assertEqual(out, {"correlation_id": "corr-1", "snapshot": snapshot})
 
+    def test_logs_fetch_recent(self) -> None:
+        logs = [
+            {"timestamp": "2026-01-01T00:01:00Z", "message": "timeout", "level": "error"},
+            {"timestamp": "2026-01-01T00:00:30Z", "message": "retrying", "level": "warning"},
+        ]
+        with patch.object(self.server.observability, "fetch_logs", return_value=logs) as logs_mock:
+            out = self.server.logs_fetch_recent("payments-api", "start", "end", limit=50)
+
+        logs_mock.assert_called_once_with("payments-api", "start", "end", 50)
+        self.assertEqual(out["correlation_id"], "corr-1")
+        self.assertEqual(out["logs"], logs)
+
+    def test_logs_fetch_recent_handles_resilience_error(self) -> None:
+        err = self.server.ResilienceError(
+            provider="elk",
+            operation="fetch_logs",
+            kind="adapter_call_failed",
+            message="elk.fetch_logs failed after 1 attempt(s)",
+            attempts=1,
+            retriable=True,
+            cause=RuntimeError("index not found"),
+        )
+        with patch.object(self.server.observability, "fetch_logs", side_effect=err):
+            out = self.server.logs_fetch_recent("payments-api", "start", "end", limit=10)
+
+        self.assertEqual(out["correlation_id"], "corr-1")
+        self.assertEqual(out["logs"], [])
+        self.assertIn("error", out)
+        self.assertEqual(out["error"]["operation"], "fetch_logs")
+        self.assertEqual(out["error"]["provider"], "elk")
+
     def test_runbooks_search(self) -> None:
         hits = [{"title": "restart payment workers", "score": 0.88}]
         with patch.object(self.server, "search_local_runbooks", return_value=hits) as search_mock:

@@ -353,6 +353,25 @@ def service_health_snapshot(service: str, start_iso: str, end_iso: str) -> dict:
 
 
 @mcp.tool()
+def logs_fetch_recent(service: str, start_iso: str, end_iso: str, limit: int = 100) -> dict:
+    args = {
+        "service": service,
+        "start_iso": start_iso,
+        "end_iso": end_iso,
+        "limit": limit,
+    }
+    corr = audit.write("logs.fetch_recent", args, ok=True)
+
+    try:
+        logs = observability.fetch_logs(service, start_iso, end_iso, limit)
+    except ResilienceError as e:
+        audit.write("logs.fetch_recent.error", {"error": e.to_dict()}, ok=False)
+        return {"correlation_id": corr, "logs": [], "error": e.to_dict()}
+
+    return {"correlation_id": corr, "logs": logs}
+
+
+@mcp.tool()
 def runbooks_search(query: str, limit: int = 5) -> dict:
     runbooks_dir = os.getenv("RUNBOOKS_DIR", CFG.runbooks_dir)
     corr = audit.write("runbooks.search", {"query": query, "limit": limit, "runbooks_dir": runbooks_dir}, ok=True)

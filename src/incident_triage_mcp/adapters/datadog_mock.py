@@ -33,3 +33,23 @@ class DatadogMock:
             },
             "top_endpoints": [{"route": "POST /checkout", "error_rate": 0.22, "latency_p95_ms": 1200}],
         }
+
+    def fetch_logs(
+        self, service: str, start_iso: str, end_iso: str, limit: int = 100
+    ) -> List[Dict[str, Any]]:
+        now = datetime.now(timezone.utc)
+        size = max(0, min(limit, 100))
+        out: List[Dict[str, Any]] = []
+        for idx in range(size):
+            ts = (now - timedelta(seconds=idx * 5)).isoformat()
+            out.append(
+                {
+                    "timestamp": ts,
+                    "service": service,
+                    "level": "error" if idx % 3 == 0 else "info",
+                    "message": "dependency timeout while calling checkout-db" if idx % 3 == 0 else "request handled",
+                    "source": "datadog-mock",
+                    "trace_id": f"trace-{idx:04d}",
+                }
+            )
+        return out
