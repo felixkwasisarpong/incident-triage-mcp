@@ -1,26 +1,38 @@
 from __future__ import annotations
-from incident_triage_mcp.audit import AuditLog
-import os
-from pathlib import Path
+
 import json
+import os
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
+from typing import Any
+
 import requests
 from mcp.server.fastmcp import FastMCP
+
 from incident_triage_mcp.adapters.datadog_mock import DatadogMock
-from incident_triage_mcp.adapters.runbooks_local import RunbooksLocal
-from incident_triage_mcp.adapters.airflow_api import AirflowAPI
 from incident_triage_mcp.adapters.idempotency_store import FileIdempotencyStore
-from incident_triage_mcp.tools.incidents import triage_incident_run
-from incident_triage_mcp.tools.evidence import load_bundle
-from incident_triage_mcp.tools.runbooks import search_runbooks as search_local_runbooks
-from incident_triage_mcp.tools.waiter import wait_for
+from incident_triage_mcp.adapters.jira_provider import get_provider, provider_name
+from incident_triage_mcp.adapters.runbooks_local import RunbooksLocal
 from incident_triage_mcp.adapters.artifacts_s3 import read_evidence_bundle
+from incident_triage_mcp.audit import AuditLog
+from incident_triage_mcp.config import ConfigError, load_config
 from incident_triage_mcp.domain_models import EvidenceBundle
-from incident_triage_mcp.config import ConfigError,load_config
-from incident_triage_mcp.tools.triage import build_triage_summary
-from incident_triage_mcp.tools.jira_draft import build_jira_draft
 from incident_triage_mcp.policy.rbac import require_allowed, role
 from incident_triage_mcp.policy.safe_actions import SafeActionContext, enforce, SafeActionError
-from incident_triage_mcp.adapters.jira_provider import get_provider, provider_name
+from incident_triage_mcp.tools.evidence import load_bundle
+from incident_triage_mcp.tools.incidents import triage_incident_run
+from incident_triage_mcp.tools.jira_draft import build_jira_draft
+from incident_triage_mcp.tools.runbooks import search_runbooks as search_local_runbooks
+from incident_triage_mcp.tools.triage import build_triage_summary
+from incident_triage_mcp.tools.waiter import wait_for
+
+
+class _NoopIdempotencyStore:
+    def get(self, key: str) -> dict[str, Any] | None:
+        return None
+
+    def set(self, key: str, value: dict[str, Any]) -> None:
+        return None
 
 
 try:
@@ -28,16 +40,121 @@ try:
 except ConfigError as e:
     raise SystemExit(f"[config] {e}") from e
 
-_mcp_host = os.getenv("MCP_HOST", "127.0.0.1")
-_mcp_port = int(os.getenv("MCP_PORT", "8000"))
+_mcp_host = os.getenv("MCP_HOST", CFG.mcp_host or "127.0.0.1")
+_mcp_port = int(os.getenv("MCP_PORT", str(CFG.mcp_port or 8000)))
 mcp = FastMCP("Incident Triage MCP", json_response=True, host=_mcp_host, port=_mcp_port)
 audit = AuditLog()
 datadog = DatadogMock()
 runbooks = RunbooksLocal()
-airflow = AirflowAPI(base_url=os.getenv("AIRFLOW_BASE_URL", "http://localhost:8080"))
-ticket_idempotency_store = FileIdempotencyStore(
-    os.getenv("IDEMPOTENCY_STORE_PATH", "./data/jira_idempotency.json")
-)
+
+
+def _build_idempotency_store():
+    path = os.getenv("IDEMPOTENCY_STORE_PATH", "./data/jira_idempotency.json")
+    try:
+        return FileIdempotencyStore(path)
+    except OSError:
+        # Keep server bootable in read-only CWDs; idempotency replay is disabled.
+        return _NoopIdempotencyStore()
+
+
+ticket_idempotency_store = _build_idempotency_store()
+
+
+def _evidence_backend() -> str:
+    backend = (os.getenv("EVIDENCE_BACKEND") or CFG.evidence_backend or "").strip().lower()
+    if not backend:
+        backend = (os.getenv("ARTIFACT_STORE") or CFG.artifact_store or "fs").strip().lower()
+    if backend in {"none", "fs", "s3", "airflow"}:
+        return backend
+    return "fs"
+
+
+def _primary_evidence_dir() -> str:
+    return (
+        os.getenv("EVIDENCE_DIR")
+        or os.getenv("AIRFLOW_ARTIFACT_DIR")
+        or CFG.evidence_dir
+        or "./evidence"
+    )
+
+
+def _evidence_dirs() -> list[str]:
+    dirs: list[str] = []
+    for candidate in [
+        os.getenv("EVIDENCE_DIR"),
+        os.getenv("AIRFLOW_ARTIFACT_DIR"),
+        CFG.evidence_dir,
+        "./airflow/artifacts",
+    ]:
+        if not candidate:
+            continue
+        resolved = str(Path(candidate))
+        if resolved not in dirs:
+            dirs.append(resolved)
+    if not dirs:
+        dirs.append("./evidence")
+    return dirs
+
+
+def _airflow_settings() -> tuple[str | None, str | None, str | None]:
+    base_url = os.getenv("AIRFLOW_BASE_URL") or CFG.airflow_base_url
+    username = os.getenv("AIRFLOW_USERNAME") or CFG.airflow_username
+    password = os.getenv("AIRFLOW_PASSWORD") or CFG.airflow_password
+    return base_url, username, password
+
+
+def _airflow_disabled_reason() -> str:
+    if _evidence_backend() != "airflow":
+        return (
+            f"Airflow integration disabled: EVIDENCE_BACKEND={_evidence_backend()!r}. "
+            "Set EVIDENCE_BACKEND=airflow to enable Airflow tools."
+        )
+    base_url, username, password = _airflow_settings()
+    missing: list[str] = []
+    if not base_url:
+        missing.append("AIRFLOW_BASE_URL")
+    if not username:
+        missing.append("AIRFLOW_USERNAME")
+    if not password:
+        missing.append("AIRFLOW_PASSWORD")
+    if missing:
+        return "Airflow backend misconfigured: missing " + ", ".join(missing)
+    return ""
+
+
+_airflow_client: Any | None = None
+
+
+def _get_airflow_client() -> tuple[Any | None, str]:
+    reason = _airflow_disabled_reason()
+    if reason:
+        return None, reason
+
+    global _airflow_client
+    if _airflow_client is None:
+        # Lazy import keeps standalone mode free from Airflow client initialization.
+        from incident_triage_mcp.adapters.airflow_api import AirflowAPI
+
+        base_url, _, _ = _airflow_settings()
+        _airflow_client = AirflowAPI(base_url=base_url or "http://localhost:8080")
+    return _airflow_client, ""
+
+
+class _AirflowProxy:
+    def trigger_dag(self, dag_id: str, conf: dict[str, Any]) -> dict[str, Any]:
+        client, reason = _get_airflow_client()
+        if reason:
+            raise RuntimeError(reason)
+        return client.trigger_dag(dag_id, conf)
+
+    def get_dag_run(self, dag_id: str, dag_run_id: str) -> dict[str, Any]:
+        client, reason = _get_airflow_client()
+        if reason:
+            raise RuntimeError(reason)
+        return client.get_dag_run(dag_id, dag_run_id)
+
+
+airflow = _AirflowProxy()
 
 
 def _jira_project_key(project_key: str | None) -> str:
@@ -105,7 +222,8 @@ def incident_triage_run(
     slack_dry_run: bool = True,
 ) -> dict:
     """
-    One-call demo: alerts -> airflow evidence -> artifact -> summary.
+    One-call triage orchestration.
+    Airflow trigger is optional and backend-dependent.
     """
     resolved_project_key = _jira_project_key(project_key)
     corr = audit.write(
@@ -118,13 +236,14 @@ def incident_triage_run(
             "notify_slack": notify_slack,
             "slack_channel": slack_channel,
             "slack_dry_run": slack_dry_run,
+            "evidence_backend": _evidence_backend(),
         },
         ok=True,
     )
 
     tickets_create = None
     if include_ticket:
-        # Keep the orchestration path safe by default: ticket hook performs dry-run only.
+        # Keep orchestration safe by default: ticket hook is dry-run.
         def _ticket_hook(
             title: str | None = None,
             body: str | None = None,
@@ -175,11 +294,11 @@ def incident_triage_run(
 @mcp.tool()
 def alerts_fetch_active(services: list[str] = None, since_minutes: int = 30, max_alerts: int = 50) -> dict:
     services = services or []
-    args = {"services":services, "since_minutes": since_minutes, "max_alerts": max_alerts}
+    args = {"services": services, "since_minutes": since_minutes, "max_alerts": max_alerts}
     corr = audit.write("alerts.fetch_active", args, ok=True)
 
     alerts = datadog.fetch_active_alerts(services, since_minutes, max_alerts)
-    by_service = {}
+    by_service: dict[str, list[str]] = {}
     for a in alerts:
         by_service.setdefault(a["service"], []).append(a["alert_id"])
 
@@ -194,13 +313,14 @@ def service_health_snapshot(service: str, start_iso: str, end_iso: str) -> dict:
     snap = datadog.health_snapshot(service, start_iso, end_iso)
     return {"correlation_id": corr, "snapshot": snap}
 
+
 @mcp.tool()
 def runbooks_search(query: str, limit: int = 5) -> dict:
-    args = {"query": query, "limit": limit}
-    corr = audit.write("runbooks.search", args, ok=True)
+    runbooks_dir = os.getenv("RUNBOOKS_DIR", CFG.runbooks_dir)
+    corr = audit.write("runbooks.search", {"query": query, "limit": limit, "runbooks_dir": runbooks_dir}, ok=True)
+    hits = search_local_runbooks(runbooks_dir, query, limit)
+    return {"correlation_id": corr, "results": hits}
 
-    results = runbooks.search(query, limit)
-    return {"correlation_id": corr, "results": results}
 
 @mcp.tool()
 def ping(message: str = "hello") -> dict:
@@ -279,20 +399,49 @@ def slack_post_update(
             "payload": payload,
         }
 
-@mcp.tool()
+
 def airflow_trigger_incident_dag(incident_id: str, service: str) -> dict:
     dag_id = "incident_evidence_v1"
     conf = {"incident_id": incident_id, "service": service}
-    corr = audit.write("airflow.trigger_incident_dag", {"dag_id": dag_id, "conf": conf}, ok=True)
+    corr = audit.write(
+        "airflow.trigger_incident_dag",
+        {"dag_id": dag_id, "conf": conf, "evidence_backend": _evidence_backend()},
+        ok=True,
+    )
 
-    run = airflow.trigger_dag(dag_id, conf)
-    return {"correlation_id": corr, "dag_id": dag_id, "dag_run": run}
+    try:
+        run = airflow.trigger_dag(dag_id, conf)
+        return {"correlation_id": corr, "dag_id": dag_id, "dag_run": run}
+    except RuntimeError as e:
+        return {
+            "correlation_id": corr,
+            "enabled": False,
+            "backend": _evidence_backend(),
+            "dag_id": dag_id,
+            "dag_run": None,
+            "error": f"airflow_disabled: {e}",
+        }
 
-@mcp.tool()
+
 def airflow_get_incident_artifact(incident_id: str) -> dict:
-    corr = audit.write("airflow.get_incident_artifact", {"incident_id": incident_id}, ok=True)
+    corr = audit.write(
+        "airflow.get_incident_artifact",
+        {"incident_id": incident_id, "evidence_backend": _evidence_backend()},
+        ok=True,
+    )
 
-    artifact_dir = Path(os.getenv("AIRFLOW_ARTIFACT_DIR", "/airflow_artifacts"))
+    if _evidence_backend() == "airflow":
+        _, reason = _get_airflow_client()
+        if reason:
+            return {
+                "correlation_id": corr,
+                "enabled": False,
+                "backend": "airflow",
+                "found": False,
+                "error": f"airflow_disabled: {reason}",
+            }
+
+    artifact_dir = Path(_primary_evidence_dir())
     path = artifact_dir / f"{incident_id}.json"
     if not path.exists():
         return {"correlation_id": corr, "found": False, "path": str(path)}
@@ -300,27 +449,50 @@ def airflow_get_incident_artifact(incident_id: str) -> dict:
     data = json.loads(path.read_text(encoding="utf-8"))
     return {"correlation_id": corr, "found": True, "path": str(path), "artifact": data}
 
-def main() -> None:
-    # stdio by default; for HTTP:
-    # MCP_TRANSPORT=streamable-http python -m incident_triage_mcp.server
-    transport = os.getenv("MCP_TRANSPORT", "stdio")
-    mcp.run(transport=transport)
-
 
 @mcp.tool()
 def evidence_get_bundle(incident_id: str) -> dict:
-    artifact_dir = os.getenv("AIRFLOW_ARTIFACT_DIR", "/airflow_artifacts")
-    corr = audit.write("evidence.get_bundle", {"incident_id": incident_id, "artifact_dir": artifact_dir}, ok=True)
-    out = load_bundle(artifact_dir, incident_id)
-    out["correlation_id"] = corr
-    return out
+    backend = _evidence_backend()
+    corr = audit.write("evidence.get_bundle", {"incident_id": incident_id, "backend": backend}, ok=True)
 
-@mcp.tool()
-def runbooks_search(query: str, limit: int = 5) -> dict:
-    runbooks_dir = os.getenv("RUNBOOKS_DIR", "/runbooks")
-    corr = audit.write("runbooks.search", {"query": query, "limit": limit, "runbooks_dir": runbooks_dir}, ok=True)
-    hits = search_local_runbooks(runbooks_dir, query, limit)
-    return {"correlation_id": corr, "results": hits}
+    if backend == "none":
+        return {
+            "correlation_id": corr,
+            "found": False,
+            "backend": "none",
+            "error": "Evidence backend is disabled (EVIDENCE_BACKEND=none).",
+        }
+
+    if backend == "s3":
+        out = read_evidence_bundle(incident_id)
+        if not out.get("found"):
+            out["correlation_id"] = corr
+            out["backend"] = "s3"
+            return out
+        bundle = EvidenceBundle.model_validate(out["raw"])
+        return {
+            "correlation_id": corr,
+            "found": True,
+            "backend": "s3",
+            "uri": out["uri"],
+            "bundle": bundle.model_dump(),
+        }
+
+    # fs and airflow backends both support local file reads.
+    fallback: dict[str, Any] | None = None
+    for evidence_dir in _evidence_dirs():
+        out = load_bundle(evidence_dir, incident_id)
+        if out.get("found"):
+            out["correlation_id"] = corr
+            out["backend"] = backend
+            return out
+        if fallback is None:
+            fallback = out
+
+    fallback = fallback or {"found": False, "path": str(Path(_primary_evidence_dir()) / f"{incident_id}.json")}
+    fallback["correlation_id"] = corr
+    fallback["backend"] = backend
+    return fallback
 
 
 @mcp.tool()
@@ -331,7 +503,6 @@ def evidence_wait_for_bundle(incident_id: str, timeout_seconds: int = 30, poll_s
         ok=True,
     )
 
-    # reuse your existing evidence_get_bundle implementation
     def _getter(iid: str) -> dict:
         return evidence_get_bundle(iid)
 
@@ -340,37 +511,94 @@ def evidence_wait_for_bundle(incident_id: str, timeout_seconds: int = 30, poll_s
     return out
 
 
-
 @mcp.tool()
-def evidence_get_bundle(incident_id: str) -> dict:
-    store = os.getenv("ARTIFACT_STORE", "s3").lower()
-    corr = audit.write("evidence.get_bundle", {"incident_id": incident_id, "store": store}, ok=True)
+def evidence_seed_sample(incident_id: str, service: str, window_minutes: int = 30) -> dict:
+    """
+    Offline helper: writes a deterministic Evidence Bundle v1 JSON to EVIDENCE_DIR.
+    """
+    window = max(1, int(window_minutes))
+    corr = audit.write(
+        "evidence.seed_sample",
+        {"incident_id": incident_id, "service": service, "window_minutes": window},
+        ok=True,
+    )
 
-    if store == "s3":
-        out = read_evidence_bundle(incident_id)
-        if not out.get("found"):
-            out["correlation_id"] = corr
-            return out
-        bundle = EvidenceBundle.model_validate(out["raw"])
-        return {"correlation_id": corr, "found": True, "uri": out["uri"], "bundle": bundle.model_dump()}
+    seed_offset = sum(ord(ch) for ch in f"{incident_id}:{service}") % (24 * 60)
+    end = datetime(2026, 1, 1, tzinfo=timezone.utc) + timedelta(minutes=seed_offset)
+    start = end - timedelta(minutes=window)
+    generated = end + timedelta(minutes=1)
 
-    # optional fs fallback if you still want it
-    artifact_dir = os.getenv("AIRFLOW_ARTIFACT_DIR", "./airflow/artifacts")
-    out = load_bundle(artifact_dir, incident_id)
-    out["correlation_id"] = corr
-    return out
+    bundle_dict = {
+        "schema_version": "v1",
+        "incident_id": incident_id,
+        "service": service,
+        "time_window": {
+            "start_iso": start.isoformat(),
+            "end_iso": end.isoformat(),
+        },
+        "alerts": [
+            {
+                "alert_id": f"alrt-{incident_id.lower()}-001",
+                "provider": "mock",
+                "service": service,
+                "name": "Error rate elevated",
+                "status": "triggered",
+                "started_at_iso": start.isoformat(),
+                "priority": "P2",
+                "signal": {"key": "error_rate", "value": 0.12, "unit": "ratio"},
+            }
+        ],
+        "signals": [
+            {"key": "error_rate", "value": 0.12, "unit": "ratio"},
+            {"key": "latency_p95_ms", "value": 840, "unit": "ms"},
+            {"key": "rps", "value": 2100},
+            {"key": "top_endpoint", "value": "POST /checkout"},
+        ],
+        "runbook_hits": [
+            {
+                "doc_id": "5xx-spike-checklist",
+                "title": "5xx Spike Checklist",
+                "score": 0.82,
+                "summary": "Validate deploy changes and dependent service health.",
+            }
+        ],
+        "hypotheses": [
+            "Recent deploy introduced elevated failure rate on checkout path",
+            "Downstream dependency latency is causing timeout amplification",
+        ],
+        "recommended_next_steps": [
+            "Confirm deploy timeline against incident window",
+            "Inspect dependency saturation and timeout rates",
+            "Run 5xx spike checklist and compare before/after metrics",
+        ],
+        "links": [
+            {"type": "dashboard", "url": "https://example.local/dashboards/payments"},
+            {"type": "logs", "url": "https://example.local/logs?q=checkout+5xx"},
+        ],
+        "generated_at_iso": generated.isoformat(),
+    }
 
+    bundle = EvidenceBundle.model_validate(bundle_dict).model_dump()
+    out_dir = Path(_primary_evidence_dir())
+    out_dir.mkdir(parents=True, exist_ok=True)
+    out_path = out_dir / f"{incident_id}.json"
+    out_path.write_text(json.dumps(bundle, ensure_ascii=False, indent=2), encoding="utf-8")
+
+    return {
+        "correlation_id": corr,
+        "seeded": True,
+        "backend": _evidence_backend(),
+        "path": str(out_path),
+        "bundle": bundle,
+    }
 
 
 @mcp.tool()
 def incident_triage_summary(incident_id: str) -> dict:
     """
     Deterministic (non-LLM) summary of an incident from the Evidence Bundle.
-    Great for recruiter demos and for agent planning.
     """
     corr = audit.write("incident.triage_summary", {"incident_id": incident_id}, ok=True)
-
-    # Reuse your existing evidence getter (S3/MinIO)
     evidence = evidence_get_bundle(incident_id)
 
     if not evidence.get("found"):
@@ -378,10 +606,11 @@ def incident_triage_summary(incident_id: str) -> dict:
         return evidence
 
     bundle = evidence.get("bundle") or {}
-    uri = evidence.get("uri")
+    uri = evidence.get("uri") or evidence.get("path")
     out = build_triage_summary(bundle, evidence_uri=uri)
     out["correlation_id"] = corr
     return out
+
 
 @mcp.tool()
 def jira_draft_ticket(incident_id: str, project_key: str | None = None) -> dict:
@@ -403,7 +632,6 @@ def jira_draft_ticket(incident_id: str, project_key: str | None = None) -> dict:
     )
     out["correlation_id"] = corr
     return out
-
 
 
 @mcp.tool()
@@ -438,10 +666,8 @@ def jira_create_ticket(
         ok=True,
     )
 
-    # RBAC first
     require_allowed(tool_name)
 
-    # For non-dry-run calls, replay existing result if this idempotency key has already been used.
     if not dry_run and normalized_idempotency_key:
         existing = ticket_idempotency_store.get(normalized_idempotency_key)
         if existing:
@@ -456,7 +682,6 @@ def jira_create_ticket(
             )
             return {"correlation_id": corr, "dry_run": False, "idempotent_replay": True, **existing}
 
-    # Build the draft from the Evidence Bundle you already have
     evidence = evidence_get_bundle(incident_id)
     if not evidence.get("found"):
         evidence["correlation_id"] = corr
@@ -476,7 +701,6 @@ def jira_create_ticket(
         audit.write("jira.create_ticket.draft_error", {"error": str(e)}, ok=False)
         return {"created": False, "error": f"draft_failed: {e}"}
 
-    # Enforce safe action (only if actually creating)
     try:
         enforce(
             SafeActionContext(
@@ -489,15 +713,12 @@ def jira_create_ticket(
             )
         )
     except SafeActionError as e:
-        # return a structured safe failure (still auditable)
         audit.write("jira.create_ticket.denied", {"correlation_id": corr, "error": str(e)}, ok=False)
         return {"correlation_id": corr, "created": False, "dry_run": dry_run, "error": str(e), "draft": draft}
 
-    # If dry-run, do not create
     if dry_run:
         return {"correlation_id": corr, "created": False, "dry_run": True, "draft": draft}
 
-    # Create via provider
     provider = get_provider()
     payload = {
         "project_key": resolved_project_key,
@@ -524,43 +745,32 @@ def jira_create_ticket(
             },
         )
 
-    audit.write("jira.create_ticket.created", {"correlation_id": corr, "result": {k: result.get(k) for k in ["created","issue_key","browse_url","provider"]}}, ok=True)
-
+    audit.write(
+        "jira.create_ticket.created",
+        {
+            "correlation_id": corr,
+            "result": {k: result.get(k) for k in ["created", "issue_key", "browse_url", "provider"]},
+        },
+        ok=True,
+    )
     return {"correlation_id": corr, "dry_run": False, **result}
 
 
 @mcp.tool()
 def jira_list_projects() -> dict:
-    """
-    Read-only helper: list Jira projects visible to the configured credentials.
-    """
     provider = provider_name()
     corr = audit.write("jira.list_projects", {"provider": provider}, ok=True)
 
     try:
         projects = get_provider().list_projects()
-        return {
-            "correlation_id": corr,
-            "ok": True,
-            "provider": provider,
-            "projects": projects,
-        }
+        return {"correlation_id": corr, "ok": True, "provider": provider, "projects": projects}
     except Exception as e:
         audit.write("jira.list_projects.error", {"error": str(e)}, ok=False)
-        return {
-            "correlation_id": corr,
-            "ok": False,
-            "provider": provider,
-            "projects": [],
-            "error": str(e),
-        }
+        return {"correlation_id": corr, "ok": False, "provider": provider, "projects": [], "error": str(e)}
 
 
 @mcp.tool()
 def jira_list_issue_types(project_key: str | None = None) -> dict:
-    """
-    Read-only helper: list available Jira issue types for a project key.
-    """
     provider = provider_name()
     resolved_project_key = _jira_project_key(project_key)
     corr = audit.write(
@@ -592,13 +802,14 @@ def jira_list_issue_types(project_key: str | None = None) -> dict:
 
 @mcp.tool()
 def jira_validate_credentials() -> dict:
-    """
-    Safe read-only Jira Cloud auth check. Does not create anything.
-    """
     corr = audit.write("jira.validate_credentials", {}, ok=True)
 
     if provider_name() != "cloud":
-        return {"correlation_id": corr, "ok": False, "error": "Set JIRA_PROVIDER=cloud to validate Jira Cloud credentials."}
+        return {
+            "correlation_id": corr,
+            "ok": False,
+            "error": "Set JIRA_PROVIDER=cloud to validate Jira Cloud credentials.",
+        }
 
     try:
         provider = get_provider()
@@ -610,5 +821,18 @@ def jira_validate_credentials() -> dict:
         audit.write("jira.validate_credentials.error", {"error": str(e)}, ok=False)
         return {"correlation_id": corr, "ok": False, "error": str(e)}
 
+
+if _evidence_backend() == "airflow":
+    # Airflow tools are discoverable only when explicitly requested.
+    mcp.tool()(airflow_trigger_incident_dag)
+    mcp.tool()(airflow_get_incident_artifact)
+
+
+def main() -> None:
+    transport = os.getenv("MCP_TRANSPORT", CFG.mcp_transport or "stdio")
+    mcp.run(transport=transport)
+
+
 if __name__ == "__main__":
     main()
+

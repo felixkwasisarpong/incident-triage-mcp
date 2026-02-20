@@ -12,7 +12,7 @@ def _pick_priority(bundle: EvidenceBundle) -> str:
     prios = [a.priority for a in bundle.alerts] or ["P3"]
     order = {"P1":1, "P2": 2, "P3": 3, "P4": 4}
     prios_sorted = sorted(prios, key=lambda p: order.get(p,99))
-    return prios_sorted(0)
+    return prios_sorted[0]
 
 def _pick_status(bundle: EvidenceBundle) -> str:
     if not bundle.alerts:

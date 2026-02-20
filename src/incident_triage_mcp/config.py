@@ -32,6 +32,8 @@ class AppConfig:
     audit_path: str
 
     # Artifact store
+    evidence_backend: str
+    evidence_dir: str
     artifact_store: str
     s3_endpoint_url: Optional[str]
     s3_bucket: Optional[str]
@@ -49,7 +51,8 @@ class AppConfig:
 
 
 def load_config() -> AppConfig:
-    artifact_store = (_env("ARTIFACT_STORE", "s3") or "s3").lower()
+    artifact_store = (_env("ARTIFACT_STORE", "fs") or "fs").lower()
+    evidence_backend = (_env("EVIDENCE_BACKEND") or artifact_store or "fs").lower()
 
     cfg = AppConfig(
         mcp_transport=_env("MCP_TRANSPORT", "stdio") or "stdio",
@@ -59,6 +62,8 @@ def load_config() -> AppConfig:
         audit_mode=(_env("AUDIT_MODE", "stdout") or "stdout").lower(),
         audit_path=_env("AUDIT_PATH", "audit.jsonl") or "audit.jsonl",
 
+        evidence_backend=evidence_backend,
+        evidence_dir=_env("EVIDENCE_DIR", "./evidence") or "./evidence",
         artifact_store=artifact_store,
         s3_endpoint_url=_env("S3_ENDPOINT_URL"),
         s3_bucket=_env("S3_BUCKET"),
@@ -77,8 +82,12 @@ def load_config() -> AppConfig:
     if cfg.audit_mode not in {"stdout", "file"}:
         raise ConfigError("AUDIT_MODE must be 'stdout' or 'file'")
 
-    # Validate artifacts
-    if cfg.artifact_store == "s3":
+    # Validate evidence backend mode
+    if cfg.evidence_backend not in {"none", "fs", "s3", "airflow"}:
+        raise ConfigError("EVIDENCE_BACKEND must be one of: none, fs, s3, airflow")
+
+    # Validate artifacts for S3 backend only
+    if cfg.evidence_backend == "s3":
         missing = []
         if not cfg.s3_endpoint_url:
             missing.append("S3_ENDPOINT_URL")
@@ -89,14 +98,8 @@ def load_config() -> AppConfig:
         if not cfg.aws_secret_access_key:
             missing.append("AWS_SECRET_ACCESS_KEY")
         if missing:
-            raise ConfigError("Missing required env vars for ARTIFACT_STORE=s3: " + ", ".join(missing))
-    elif cfg.artifact_store != "fs":
-        raise ConfigError("ARTIFACT_STORE must be 's3' or 'fs'")
-
-    # Airflow is optional: only validate if user intends to use it
-    if cfg.airflow_base_url:
-        # if base url set, require creds (since your setup uses basic auth)
-        if not cfg.airflow_username or not cfg.airflow_password:
-            raise ConfigError("AIRFLOW_BASE_URL is set, but AIRFLOW_USERNAME/AIRFLOW_PASSWORD are missing")
+            raise ConfigError(
+                "Missing required env vars for EVIDENCE_BACKEND=s3: " + ", ".join(missing)
+            )
 
     return cfg

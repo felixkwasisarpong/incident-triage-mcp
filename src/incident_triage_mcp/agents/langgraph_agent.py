@@ -206,8 +206,10 @@ def main(argv: list[str] | None = None) -> int:
         parser.error("--confirm-token (or CONFIRM_TOKEN env) is required when --create-ticket-live is set.")
 
     # Force deterministic local defaults for CLI usage.
+    os.environ["EVIDENCE_BACKEND"] = args.artifact_store
     os.environ["ARTIFACT_STORE"] = args.artifact_store
     if args.artifact_store == "fs":
+        os.environ["EVIDENCE_DIR"] = args.artifact_dir
         os.environ["AIRFLOW_ARTIFACT_DIR"] = args.artifact_dir
 
     state = run_agent(
