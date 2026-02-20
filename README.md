@@ -1,5 +1,7 @@
 # Incident Triage MCP
 
+<!-- mcp-name: io.github.felixkwasisarpong/incident-triage-mcp -->
+
 ![Python](https://img.shields.io/badge/python-3.10%2B-blue.svg)
 ![MCP](https://img.shields.io/badge/MCP-compatible-brightgreen)
 ![Transport](https://img.shields.io/badge/transport-stdio%20%7C%20streamable--http-blueviolet)
@@ -302,6 +304,33 @@ git push origin v0.2.0
 Notes:
 - The workflow validates that tag `vX.Y.Z` matches `project.version` in `pyproject.toml`.
 - GHCR publish uses the built-in `GITHUB_TOKEN`.
+
+---
+
+## MCP Registry Listing
+
+This repo includes official MCP Registry metadata in `server.json`.
+
+Validation/publish commands:
+
+```bash
+# Install mcp-publisher (example: macOS arm64)
+curl -LsSf https://github.com/modelcontextprotocol/registry/releases/latest/download/mcp-publisher_darwin_arm64.tar.gz -o /tmp/mcp-publisher.tgz
+tar -xzf /tmp/mcp-publisher.tgz -C /tmp
+sudo mv /tmp/mcp-publisher /usr/local/bin/mcp-publisher
+
+# Validate + publish
+mcp-publisher validate server.json
+mcp-publisher login github
+mcp-publisher publish
+```
+
+Notes:
+- Server name is `io.github.felixkwasisarpong/incident-triage-mcp`.
+- PyPI verification marker is embedded in this README (`mcp-name: ...`).
+- OCI verification is provided via Docker image label (`io.modelcontextprotocol.server.name`).
+- Use the matching binary asset for your OS/arch from:
+  `https://github.com/modelcontextprotocol/registry/releases/latest`
 
 ---
 
