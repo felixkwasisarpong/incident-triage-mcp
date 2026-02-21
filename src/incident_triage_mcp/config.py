@@ -157,6 +157,10 @@ def load_config() -> AppConfig:
             allowed_str = ", ".join(sorted(allowed))
             raise ConfigError(f"{env_name} must be one of: {allowed_str}")
 
+    ticket_provider = (_env("JIRA_PROVIDER", "mock") or "mock").lower()
+    if ticket_provider not in {"mock", "cloud", "servicenow"}:
+        raise ConfigError("JIRA_PROVIDER must be one of: mock, cloud, servicenow")
+
     # Validate HTTP auth settings
     if cfg.http_auth_mode not in {"none", "api_key", "jwt_hs256"}:
         raise ConfigError("MCP_HTTP_AUTH_MODE must be one of: none, api_key, jwt_hs256")
@@ -195,6 +199,23 @@ def load_config() -> AppConfig:
                 raise ConfigError(
                     f"Missing required env vars for {provider} provider in {cfg.deployment_profile} profile: "
                     + ", ".join(missing)
+                )
+
+        ticket_provider_requirements: dict[str, list[str]] = {
+            "cloud": ["JIRA_BASE_URL", "JIRA_EMAIL", "JIRA_API_TOKEN"],
+            "servicenow": [
+                "SERVICENOW_BASE_URL",
+                "SERVICENOW_USERNAME",
+                "SERVICENOW_PASSWORD",
+            ],
+        }
+        required_ticket_env = ticket_provider_requirements.get(ticket_provider)
+        if required_ticket_env:
+            missing_ticket = [name for name in required_ticket_env if not _env(name)]
+            if missing_ticket:
+                raise ConfigError(
+                    f"Missing required env vars for JIRA_PROVIDER={ticket_provider} in "
+                    f"{cfg.deployment_profile} profile: " + ", ".join(missing_ticket)
                 )
 
     if cfg.deployment_profile == "prod":

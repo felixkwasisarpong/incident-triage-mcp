@@ -908,6 +908,23 @@ class TestServerTools(unittest.TestCase):
         self.assertTrue(out["ok"])
         self.assertEqual(out["displayName"], "Felix")
 
+    def test_jira_validate_credentials_servicenow_ok(self) -> None:
+        provider = Mock()
+        provider.validate.return_value = {
+            "accountId": "user-1",
+            "displayName": "Incident Bot",
+            "provider": "servicenow",
+        }
+        with patch.object(self.server, "provider_name", return_value="servicenow"), patch.object(
+            self.server, "get_provider", return_value=provider
+        ):
+            out = self.server.jira_validate_credentials()
+
+        provider.validate.assert_called_once()
+        self.assertEqual(out["correlation_id"], "corr-1")
+        self.assertTrue(out["ok"])
+        self.assertEqual(out["provider"], "servicenow")
+
     def test_jira_validate_credentials_cloud_error(self) -> None:
         with patch.object(self.server, "provider_name", return_value="cloud"), patch.object(
             self.server, "get_provider", side_effect=RuntimeError("auth failed")
