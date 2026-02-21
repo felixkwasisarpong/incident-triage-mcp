@@ -32,6 +32,11 @@ class TestAdapterScaffold(unittest.TestCase):
             with self.assertRaises(ConfigError):
                 load_config()
 
+    def test_config_rejects_invalid_ticket_provider_flag(self) -> None:
+        with patch.dict(os.environ, {"JIRA_PROVIDER": "bad-provider"}, clear=True):
+            with self.assertRaises(ConfigError):
+                load_config()
+
     def test_config_rejects_invalid_resilience_values(self) -> None:
         with patch.dict(os.environ, {"ADAPTER_TIMEOUT_SECONDS": "0"}, clear=True):
             with self.assertRaises(ConfigError):
@@ -80,6 +85,19 @@ class TestAdapterScaffold(unittest.TestCase):
                 "DEPLOYMENT_PROFILE": "staging",
                 "MCP_TRANSPORT": "stdio",
                 "ALERTS_PROVIDER": "opsgenie",
+            },
+            clear=True,
+        ):
+            with self.assertRaises(ConfigError):
+                load_config()
+
+    def test_staging_requires_servicenow_secrets_when_selected(self) -> None:
+        with patch.dict(
+            os.environ,
+            {
+                "DEPLOYMENT_PROFILE": "staging",
+                "MCP_TRANSPORT": "stdio",
+                "JIRA_PROVIDER": "servicenow",
             },
             clear=True,
         ):

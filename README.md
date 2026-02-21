@@ -89,7 +89,7 @@ MCP_ROLE=viewer|triager|responder|admin
 CONFIRM_TOKEN=CHANGE_ME_12345   # required for non-dry-run safe actions
 
 # Jira provider selection
-JIRA_PROVIDER=mock|cloud
+JIRA_PROVIDER=mock|cloud|servicenow
 JIRA_PROJECT_KEY=INC
 JIRA_ISSUE_TYPE=Task
 
@@ -97,6 +97,12 @@ JIRA_ISSUE_TYPE=Task
 JIRA_BASE_URL=https://your-domain.atlassian.net
 JIRA_EMAIL=you@example.com
 JIRA_API_TOKEN=***
+
+# ServiceNow (required when JIRA_PROVIDER=servicenow)
+SERVICENOW_BASE_URL=https://your-instance.service-now.com
+SERVICENOW_USERNAME=incident_bot
+SERVICENOW_PASSWORD=***
+SERVICENOW_TABLE=incident
 
 # from repo root
 pip install -e .
@@ -182,9 +188,24 @@ S3_REGION=us-east-1
 AWS_ACCESS_KEY_ID=minioadmin
 AWS_SECRET_ACCESS_KEY=minioadmin
 
+# Ticket provider selection
+JIRA_PROVIDER=mock|cloud|servicenow
+
 # Jira ticket defaults
 JIRA_PROJECT_KEY=INC
 JIRA_ISSUE_TYPE=Task
+
+# Jira Cloud credentials (required when JIRA_PROVIDER=cloud)
+JIRA_BASE_URL=https://your-domain.atlassian.net
+JIRA_EMAIL=you@example.com
+JIRA_API_TOKEN=***
+
+# ServiceNow credentials (required when JIRA_PROVIDER=servicenow)
+SERVICENOW_BASE_URL=https://your-instance.service-now.com
+SERVICENOW_USERNAME=incident_bot
+SERVICENOW_PASSWORD=***
+SERVICENOW_TABLE=incident
+SERVICENOW_CATEGORY=inquiry
 
 # Slack notifications
 SLACK_WEBHOOK_URL=https://hooks.slack.com/services/...
@@ -321,6 +342,13 @@ Adapter env matrix (validated when selected in `staging`/`prod`):
 | `elk` | `ELASTICSEARCH_BASE_URL` |
 | `cloudwatch` | Uses AWS auth chain (or `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY`) |
 | `xray` | Uses AWS auth chain (or `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY`) |
+
+Ticket provider env matrix (validated when selected in `staging`/`prod`):
+
+| Provider (`JIRA_PROVIDER`) | Required env vars |
+|---|---|
+| `cloud` | `JIRA_BASE_URL`, `JIRA_EMAIL`, `JIRA_API_TOKEN` |
+| `servicenow` | `SERVICENOW_BASE_URL`, `SERVICENOW_USERNAME`, `SERVICENOW_PASSWORD` |
 
 ---
 
@@ -627,7 +655,7 @@ Typical demo sequence:
 
 ## Jira ticketing demo
 
-0) Validate Jira Cloud credentials (cloud provider only):
+0) Validate ticket provider credentials (`cloud` or `servicenow`):
    - `jira_validate_credentials()`
 
 1) Discover Jira metadata first (recommended):
@@ -649,9 +677,10 @@ Typical demo sequence:
 Notes:
 - Non-dry-run is blocked unless **RBAC** allows it (`MCP_ROLE=responder|admin`) and `CONFIRM_TOKEN` is provided.
 - Non-dry-run Slack posts are also RBAC-gated (`slack.post_update`, allowed for `MCP_ROLE=responder|admin`).
-- Swap providers via env: `JIRA_PROVIDER=mock` (demo) or `JIRA_PROVIDER=cloud` (real Jira Cloud).
+- Swap providers via env: `JIRA_PROVIDER=mock` (demo), `JIRA_PROVIDER=cloud` (real Jira Cloud), or `JIRA_PROVIDER=servicenow` (real ServiceNow).
 - `JIRA_ISSUE_TYPE` defaults to `Task` (used for creates unless overridden in code).
 - Jira Cloud descriptions are sent as ADF and render section headers/bullets/inline formatting in the Jira UI.
+- ServiceNow creates records in `/api/now/table/incident` by default (override with `SERVICENOW_TABLE`).
 - Reusing the same `idempotency_key` on non-dry-run `jira_create_ticket` returns the existing issue instead of creating a duplicate.
 
 ## Runbooks (local Markdown)
