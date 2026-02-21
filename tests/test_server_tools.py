@@ -952,6 +952,30 @@ class TestServerTools(unittest.TestCase):
         self.assertIn("confirm_token", out["error"])
         self.assertEqual(out["draft"], draft)
 
+    def test_jira_create_ticket_non_dry_run_requires_idempotency_key(self) -> None:
+        draft = {
+            "title": "Incident title",
+            "priority": "P1",
+            "labels": ["incident"],
+            "description_md": "details",
+            "evidence_uri": "s3://bucket/INC-DENY-IDEMPOTENCY.json",
+        }
+        with patch.object(self.server, "require_allowed"), patch.object(
+            self.server, "evidence_get_bundle", return_value={"found": True, "bundle": _bundle("INC-DENY-IDEMPOTENCY")}
+        ), patch.object(self.server, "build_jira_draft", return_value=draft):
+            out = self.server.jira_create_ticket(
+                "INC-DENY-IDEMPOTENCY",
+                dry_run=False,
+                reason="Create real incident ticket for coordination",
+                confirm_token="test-confirm-token",
+            )
+
+        self.assertEqual(out["correlation_id"], "corr-1")
+        self.assertFalse(out["created"])
+        self.assertFalse(out["dry_run"])
+        self.assertIn("idempotency_key", out["error"])
+        self.assertEqual(out["draft"], draft)
+
     def test_jira_create_ticket_draft_error(self) -> None:
         with patch.object(self.server, "require_allowed"), patch.object(
             self.server, "evidence_get_bundle", return_value={"found": True, "bundle": _bundle("INC-BAD-DRAFT")}

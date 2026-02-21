@@ -686,6 +686,11 @@ Typical demo sequence:
 
 Notes:
 - Non-dry-run is blocked unless **RBAC** allows it (`MCP_ROLE=responder|admin`) and `CONFIRM_TOKEN` is provided.
+- Non-dry-run `jira_create_ticket` also requires `idempotency_key` (prevents duplicate tickets on retries).
+- Approval tokens support single and rotated forms:
+  - `CONFIRM_TOKEN` (legacy single token)
+  - `CONFIRM_TOKENS` (comma-separated tokens)
+  - `CONFIRM_TOKEN_SHA256` / `CONFIRM_TOKENS_SHA256` (sha256 digests instead of plaintext)
 - Non-dry-run Slack posts are RBAC-gated (`slack.post_update`, allowed for `MCP_ROLE=responder|admin`).
 - Non-dry-run Teams posts are RBAC-gated (`teams.post_update`, allowed for `MCP_ROLE=responder|admin`).
 - Swap providers via env: `JIRA_PROVIDER=mock` (demo), `JIRA_PROVIDER=cloud` (real Jira Cloud), or `JIRA_PROVIDER=servicenow` (real ServiceNow).
