@@ -1,11 +1,17 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from importlib import import_module
 from typing import Any, Callable
 
-from incident_triage_mcp.adapters.contracts import AlertsProvider, MetricsProvider, ObservabilityAdapter
+from incident_triage_mcp.adapters.contracts import (
+    AlertsProvider,
+    LogsProvider,
+    MetricsProvider,
+    ObservabilityAdapter,
+    TracesProvider,
+)
 from incident_triage_mcp.adapters.datadog_mock import DatadogMock
-from incident_triage_mcp.adapters.datadog_real import DatadogAPI
 from incident_triage_mcp.adapters.resilience import ResiliencePolicy, ResilienceRunner
 from incident_triage_mcp.secrets.loader import SecretsLoader
 
@@ -27,6 +33,39 @@ class _UnimplementedObservabilityAdapter:
     def health_snapshot(self, service: str, start_iso: str, end_iso: str) -> dict[str, Any]:
         self._raise("health_snapshot")
 
+    def fetch_logs(
+        self, service: str, start_iso: str, end_iso: str, limit: int = 100
+    ) -> list[dict[str, Any]]:
+        self._raise("fetch_logs")
+
+    def fetch_traces(
+        self, service: str, start_iso: str, end_iso: str, limit: int = 100
+    ) -> list[dict[str, Any]]:
+        self._raise("fetch_traces")
+
+
+class _DisabledObservabilityAdapter:
+    def __init__(self, provider: str = "none") -> None:
+        self.provider = provider
+
+    def fetch_active_alerts(
+        self, services: list[str], since_minutes: int, max_alerts: int
+    ) -> list[dict[str, Any]]:
+        raise RuntimeError(f"Observability provider '{self.provider}' disables fetch_active_alerts.")
+
+    def health_snapshot(self, service: str, start_iso: str, end_iso: str) -> dict[str, Any]:
+        raise RuntimeError(f"Observability provider '{self.provider}' disables health_snapshot.")
+
+    def fetch_logs(
+        self, service: str, start_iso: str, end_iso: str, limit: int = 100
+    ) -> list[dict[str, Any]]:
+        return []
+
+    def fetch_traces(
+        self, service: str, start_iso: str, end_iso: str, limit: int = 100
+    ) -> list[dict[str, Any]]:
+        return []
+
 
 _OBSERVABILITY_PROVIDERS: dict[str, Callable[[SecretsLoader], ObservabilityAdapter]] = {}
 
@@ -45,12 +84,82 @@ def _build_provider(name: str, secrets: SecretsLoader) -> ObservabilityAdapter:
     return factory(secrets)
 
 
+def _lazy_provider_factory(
+    module_name: str,
+    class_name: str,
+    provider_name: str,
+) -> Callable[[SecretsLoader], ObservabilityAdapter]:
+    def _factory(secrets: SecretsLoader) -> ObservabilityAdapter:
+        try:
+            module = import_module(module_name)
+            adapter_cls = getattr(module, class_name)
+        except ModuleNotFoundError as exc:
+            if provider_name in {"cloudwatch", "xray"} and exc.name in {"boto3", "botocore"}:
+                raise RuntimeError(
+                    f"Observability provider '{provider_name}' requires optional dependency 'boto3'. "
+                    "Install with: pip install 'incident-triage-mcp[aws]'"
+                ) from exc
+            raise RuntimeError(
+                f"Observability provider '{provider_name}' dependencies are missing: {exc!s}"
+            ) from exc
+        return adapter_cls(secrets)
+
+    return _factory
+
+
 def _register_builtin_providers() -> None:
     if _OBSERVABILITY_PROVIDERS:
         return
     register_observability_provider("mock", lambda _secrets: DatadogMock())
-    register_observability_provider("datadog", lambda secrets: DatadogAPI(secrets))
-    register_observability_provider("cloudwatch", lambda _secrets: _UnimplementedObservabilityAdapter("cloudwatch"))
+    register_observability_provider(
+        "datadog",
+        _lazy_provider_factory(
+            "incident_triage_mcp.adapters.datadog_real",
+            "DatadogAPI",
+            "datadog",
+        ),
+    )
+    register_observability_provider(
+        "cloudwatch",
+        _lazy_provider_factory(
+            "incident_triage_mcp.adapters.cloudwatch_real",
+            "CloudWatchAPI",
+            "cloudwatch",
+        ),
+    )
+    register_observability_provider(
+        "prometheus",
+        _lazy_provider_factory(
+            "incident_triage_mcp.adapters.prometheus_real",
+            "PrometheusAPI",
+            "prometheus",
+        ),
+    )
+    register_observability_provider(
+        "pagerduty",
+        _lazy_provider_factory(
+            "incident_triage_mcp.adapters.pagerduty_real",
+            "PagerDutyAPI",
+            "pagerduty",
+        ),
+    )
+    register_observability_provider(
+        "elk",
+        _lazy_provider_factory(
+            "incident_triage_mcp.adapters.elk_logs_real",
+            "ElkLogsAPI",
+            "elk",
+        ),
+    )
+    register_observability_provider(
+        "xray",
+        _lazy_provider_factory(
+            "incident_triage_mcp.adapters.xray_real",
+            "XRayAPI",
+            "xray",
+        ),
+    )
+    register_observability_provider("none", lambda _secrets: _DisabledObservabilityAdapter("none"))
 
 
 @dataclass
@@ -61,6 +170,7 @@ class ObservabilityRegistry:
     traces_provider: str
     secrets: SecretsLoader
     resilience_policy: ResiliencePolicy
+    resilience_event_sink: Callable[[dict[str, Any]], None] | None = None
 
     def __post_init__(self) -> None:
         _register_builtin_providers()
@@ -77,13 +187,27 @@ class ObservabilityRegistry:
 
         self._alerts_adapter = _cached_provider(self.alerts_provider)
         self._metrics_adapter = _cached_provider(self.metrics_provider)
+        self._logs_adapter = _cached_provider(self.logs_provider)
+        self._traces_adapter = _cached_provider(self.traces_provider)
         self._alerts_runner = ResilienceRunner(
             provider=self.alerts_provider,
             policy=self.resilience_policy,
+            event_sink=self.resilience_event_sink,
         )
         self._metrics_runner = ResilienceRunner(
             provider=self.metrics_provider,
             policy=self.resilience_policy,
+            event_sink=self.resilience_event_sink,
+        )
+        self._logs_runner = ResilienceRunner(
+            provider=self.logs_provider,
+            policy=self.resilience_policy,
+            event_sink=self.resilience_event_sink,
+        )
+        self._traces_runner = ResilienceRunner(
+            provider=self.traces_provider,
+            policy=self.resilience_policy,
+            event_sink=self.resilience_event_sink,
         )
 
     def provider_summary(self) -> dict[str, str]:
@@ -114,6 +238,40 @@ class ObservabilityRegistry:
             end_iso,
         )
 
+    def fetch_logs(
+        self, service: str, start_iso: str, end_iso: str, limit: int = 100
+    ) -> list[dict[str, Any]]:
+        logs_fn = getattr(self._logs_adapter, "fetch_logs", None)
+        if not callable(logs_fn):
+            raise RuntimeError(
+                f"Observability provider '{self.logs_provider}' is configured but does not implement fetch_logs."
+            )
+        return self._logs_runner.invoke(
+            "fetch_logs",
+            logs_fn,
+            service,
+            start_iso,
+            end_iso,
+            limit,
+        )
+
+    def fetch_traces(
+        self, service: str, start_iso: str, end_iso: str, limit: int = 100
+    ) -> list[dict[str, Any]]:
+        traces_fn = getattr(self._traces_adapter, "fetch_traces", None)
+        if not callable(traces_fn):
+            raise RuntimeError(
+                f"Observability provider '{self.traces_provider}' is configured but does not implement fetch_traces."
+            )
+        return self._traces_runner.invoke(
+            "fetch_traces",
+            traces_fn,
+            service,
+            start_iso,
+            end_iso,
+            limit,
+        )
+
     @property
     def alerts_adapter(self) -> AlertsProvider:
         return self._alerts_adapter
@@ -121,6 +279,14 @@ class ObservabilityRegistry:
     @property
     def metrics_adapter(self) -> MetricsProvider:
         return self._metrics_adapter
+
+    @property
+    def logs_adapter(self) -> LogsProvider:
+        return self._logs_adapter
+
+    @property
+    def traces_adapter(self) -> TracesProvider:
+        return self._traces_adapter
 
 
 def build_observability_registry(
@@ -131,6 +297,7 @@ def build_observability_registry(
     traces_provider: str,
     secrets: SecretsLoader,
     resilience_policy: ResiliencePolicy | None = None,
+    resilience_event_sink: Callable[[dict[str, Any]], None] | None = None,
 ) -> ObservabilityRegistry:
     return ObservabilityRegistry(
         alerts_provider=alerts_provider,
@@ -139,4 +306,5 @@ def build_observability_registry(
         traces_provider=traces_provider,
         secrets=secrets,
         resilience_policy=resilience_policy or ResiliencePolicy(),
+        resilience_event_sink=resilience_event_sink,
     )

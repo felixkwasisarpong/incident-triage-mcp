@@ -2,14 +2,20 @@ from __future__ import annotations
 
 import json
 import os
+import time
+from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
+from functools import wraps
 from pathlib import Path
 from typing import Any
 
 import requests
 from mcp.server.fastmcp import FastMCP
 
-from incident_triage_mcp.adapters.idempotency_store import FileIdempotencyStore
+from incident_triage_mcp.adapters.idempotency_store import (
+    IdempotencyStore,
+    build_idempotency_store_from_env,
+)
 from incident_triage_mcp.adapters.jira_provider import get_provider, provider_name
 from incident_triage_mcp.adapters.registry import build_observability_registry
 from incident_triage_mcp.adapters.resilience import ResilienceError, ResiliencePolicy
@@ -18,8 +24,10 @@ from incident_triage_mcp.adapters.artifacts_s3 import read_evidence_bundle
 from incident_triage_mcp.audit import AuditLog
 from incident_triage_mcp.config import ConfigError, load_config
 from incident_triage_mcp.domain_models import EvidenceBundle
+from incident_triage_mcp.policy.http_auth import HTTPAuthError, verify_api_key, verify_jwt_from_headers
 from incident_triage_mcp.policy.rbac import require_allowed, role
 from incident_triage_mcp.policy.safe_actions import SafeActionContext, enforce, SafeActionError
+from incident_triage_mcp.telemetry import ServiceTelemetry
 from incident_triage_mcp.tools.evidence import load_bundle
 from incident_triage_mcp.tools.incidents import triage_incident_run
 from incident_triage_mcp.tools.jira_draft import build_jira_draft
@@ -51,6 +59,19 @@ _mcp_host = os.getenv("MCP_HOST", CFG.mcp_host or "127.0.0.1")
 _mcp_port = int(os.getenv("MCP_PORT", str(CFG.mcp_port or 8000)))
 mcp = FastMCP("Incident Triage MCP", json_response=True, host=_mcp_host, port=_mcp_port)
 audit = AuditLog()
+telemetry = ServiceTelemetry("incident-triage-mcp")
+
+
+def _record_resilience_event(event: dict[str, Any]) -> None:
+    kind = str(event.get("kind", "adapter_call_failed"))
+    telemetry.observe_adapter(
+        str(event.get("provider", "unknown")),
+        str(event.get("operation", "unknown")),
+        ok=(kind == "success"),
+        latency_ms=float(event.get("elapsed_ms", 0.0)),
+    )
+
+
 observability = build_observability_registry(
     alerts_provider=CFG.alerts_provider,
     metrics_provider=CFG.metrics_provider,
@@ -65,18 +86,190 @@ observability = build_observability_registry(
         circuit_failure_threshold=CFG.adapter_circuit_failure_threshold,
         circuit_open_seconds=CFG.adapter_circuit_open_seconds,
     ),
+    resilience_event_sink=_record_resilience_event,
 )
 # Backward-compatible test hook; currently points at alerts provider adapter.
 datadog = observability.alerts_adapter
 runbooks = RunbooksLocal()
 
 
-def _build_idempotency_store():
-    path = os.getenv("IDEMPOTENCY_STORE_PATH", "./data/jira_idempotency.json")
+def _active_transport() -> str:
+    return (os.getenv("MCP_TRANSPORT", CFG.mcp_transport or "stdio") or "stdio").strip().lower()
+
+
+def _request_headers() -> dict[str, str]:
+    get_context = getattr(mcp, "get_context", None)
+    if not callable(get_context):
+        return {}
     try:
-        return FileIdempotencyStore(path)
-    except OSError:
-        # Keep server bootable in read-only CWDs; idempotency replay is disabled.
+        ctx = get_context()
+    except Exception:
+        return {}
+    try:
+        request_context = getattr(ctx, "request_context", None)
+    except Exception:
+        # FastMCP can raise outside an active request context.
+        return {}
+    request = getattr(request_context, "request", None) if request_context is not None else None
+    headers = getattr(request, "headers", None)
+    if not headers:
+        return {}
+    try:
+        return {str(k).lower(): str(v) for k, v in headers.items()}
+    except Exception:
+        return {}
+
+
+def _request_correlation_id(headers: dict[str, str]) -> str | None:
+    for key in ("x-correlation-id", "x-request-id"):
+        value = (headers.get(key) or "").strip()
+        if value:
+            return value
+    return None
+
+
+@contextmanager
+def _tool_observation(tool_name: str):
+    started = time.perf_counter()
+    try:
+        yield
+    except Exception:
+        telemetry.observe_tool(tool_name, ok=False, latency_ms=(time.perf_counter() - started) * 1000.0)
+        raise
+    telemetry.observe_tool(tool_name, ok=True, latency_ms=(time.perf_counter() - started) * 1000.0)
+
+
+def _instrumented_tool(tool_name: str):
+    def _decorate(fn):
+        @wraps(fn)
+        def _wrapped(*args, **kwargs):
+            with _tool_observation(tool_name):
+                return fn(*args, **kwargs)
+
+        return _wrapped
+
+    return _decorate
+
+
+def _assert_audit_meta_complete(meta: dict[str, Any]) -> None:
+    required = {
+        "transport",
+        "auth_mode",
+        "auth_required",
+        "authenticated",
+        "principal",
+        "request_id",
+    }
+    missing = [key for key in sorted(required) if key not in meta]
+    if missing:
+        raise RuntimeError(f"Incomplete audit metadata: missing {', '.join(missing)}")
+
+
+def _tool_request_meta(tool_event: str) -> tuple[dict[str, Any], str | None]:
+    headers = _request_headers()
+    request_id = _request_correlation_id(headers)
+    transport = _active_transport()
+    mode = CFG.http_auth_mode
+    auth_required = transport == "streamable-http" and mode != "none"
+
+    meta: dict[str, Any] = {
+        "transport": transport,
+        "auth_mode": mode,
+        "auth_required": auth_required,
+        "authenticated": False,
+        "principal": "local-cli" if transport == "stdio" else "anonymous",
+        "request_id": request_id,
+    }
+
+    if not auth_required:
+        _assert_audit_meta_complete(meta)
+        return meta, request_id
+
+    try:
+        if mode == "api_key":
+            verdict = verify_api_key(headers, CFG.http_api_key or "")
+        elif mode == "jwt_hs256":
+            verdict = verify_jwt_from_headers(
+                headers,
+                CFG.http_jwt_secret or "",
+                issuer=CFG.http_jwt_issuer,
+                audience=CFG.http_jwt_audience,
+                leeway_seconds=CFG.http_jwt_leeway_seconds,
+            )
+        else:
+            raise HTTPAuthError(f"Unsupported MCP_HTTP_AUTH_MODE={mode!r}")
+    except HTTPAuthError as e:
+        telemetry.observe_auth_denied()
+        _assert_audit_meta_complete(meta)
+        audit.write(
+            f"{tool_event}.auth_denied",
+            {"error": str(e)},
+            ok=False,
+            meta=meta,
+            correlation_id=request_id,
+        )
+        raise
+
+    meta.update(
+        {
+            "authenticated": bool(verdict.get("authenticated", True)),
+            "principal": str(verdict.get("principal", "authenticated-client")),
+        }
+    )
+    if "issuer" in verdict:
+        meta["issuer"] = verdict.get("issuer")
+    if "audience" in verdict:
+        meta["audience"] = verdict.get("audience")
+    _assert_audit_meta_complete(meta)
+    return meta, request_id
+
+
+def _http_health_payload() -> dict[str, Any]:
+    airflow_reason = _airflow_disabled_reason()
+    health = telemetry.health()
+    health["transport"] = _active_transport()
+    health["evidence_backend"] = _evidence_backend()
+    health["providers"] = observability.provider_summary()
+    health["airflow"] = {
+        "enabled": airflow_reason == "",
+        "reason": airflow_reason or None,
+    }
+    return health
+
+
+def _http_metrics_payload() -> dict[str, Any]:
+    snapshot = telemetry.snapshot()
+    snapshot["transport"] = _active_transport()
+    snapshot["evidence_backend"] = _evidence_backend()
+    snapshot["providers"] = observability.provider_summary()
+    return snapshot
+
+
+def _register_http_health_routes() -> None:
+    custom_route = getattr(mcp, "custom_route", None)
+    if not callable(custom_route):
+        return
+    try:
+        from starlette.responses import JSONResponse
+    except Exception:
+        return
+
+    @custom_route("/healthz", methods=["GET"], include_in_schema=False)
+    async def _healthz(_request):  # pragma: no cover - exercised in HTTP runtime
+        payload = _http_health_payload()
+        status_code = 200 if payload.get("ok") else 503
+        return JSONResponse(payload, status_code=status_code)
+
+    @custom_route("/metrics", methods=["GET"], include_in_schema=False)
+    async def _metrics(_request):  # pragma: no cover - exercised in HTTP runtime
+        return JSONResponse(_http_metrics_payload())
+
+
+def _build_idempotency_store() -> IdempotencyStore:
+    try:
+        return build_idempotency_store_from_env()
+    except Exception:
+        # Keep server bootable if backend is unavailable/misconfigured.
         return _NoopIdempotencyStore()
 
 
@@ -235,6 +428,7 @@ def _build_slack_message(
 
 
 @mcp.tool()
+@_instrumented_tool("incident_triage_run")
 def incident_triage_run(
     incident_id: str,
     service: str,
@@ -248,6 +442,7 @@ def incident_triage_run(
     One-call triage orchestration.
     Airflow trigger is optional and backend-dependent.
     """
+    meta, request_id = _tool_request_meta("incident.triage_run")
     resolved_project_key = _jira_project_key(project_key)
     corr = audit.write(
         "incident.triage_run",
@@ -262,6 +457,8 @@ def incident_triage_run(
             "evidence_backend": _evidence_backend(),
         },
         ok=True,
+        meta=meta,
+        correlation_id=request_id,
     )
 
     tickets_create = None
@@ -315,10 +512,12 @@ def incident_triage_run(
 
 
 @mcp.tool()
+@_instrumented_tool("alerts_fetch_active")
 def alerts_fetch_active(services: list[str] = None, since_minutes: int = 30, max_alerts: int = 50) -> dict:
+    meta, request_id = _tool_request_meta("alerts.fetch_active")
     services = services or []
     args = {"services": services, "since_minutes": since_minutes, "max_alerts": max_alerts}
-    corr = audit.write("alerts.fetch_active", args, ok=True)
+    corr = audit.write("alerts.fetch_active", args, ok=True, meta=meta, correlation_id=request_id)
 
     try:
         alerts = observability.fetch_active_alerts(services, since_minutes, max_alerts)
@@ -339,9 +538,11 @@ def alerts_fetch_active(services: list[str] = None, since_minutes: int = 30, max
 
 
 @mcp.tool()
+@_instrumented_tool("service_health_snapshot")
 def service_health_snapshot(service: str, start_iso: str, end_iso: str) -> dict:
+    meta, request_id = _tool_request_meta("service.health_snapshot")
     args = {"service": service, "start_iso": start_iso, "end_iso": end_iso}
-    corr = audit.write("service.health_snapshot", args, ok=True)
+    corr = audit.write("service.health_snapshot", args, ok=True, meta=meta, correlation_id=request_id)
 
     try:
         snap = observability.health_snapshot(service, start_iso, end_iso)
@@ -353,19 +554,93 @@ def service_health_snapshot(service: str, start_iso: str, end_iso: str) -> dict:
 
 
 @mcp.tool()
+@_instrumented_tool("logs_fetch_recent")
+def logs_fetch_recent(service: str, start_iso: str, end_iso: str, limit: int = 100) -> dict:
+    meta, request_id = _tool_request_meta("logs.fetch_recent")
+    args = {
+        "service": service,
+        "start_iso": start_iso,
+        "end_iso": end_iso,
+        "limit": limit,
+    }
+    corr = audit.write("logs.fetch_recent", args, ok=True, meta=meta, correlation_id=request_id)
+
+    try:
+        logs = observability.fetch_logs(service, start_iso, end_iso, limit)
+    except ResilienceError as e:
+        audit.write("logs.fetch_recent.error", {"error": e.to_dict()}, ok=False)
+        return {"correlation_id": corr, "logs": [], "error": e.to_dict()}
+
+    return {"correlation_id": corr, "logs": logs}
+
+
+@mcp.tool()
+@_instrumented_tool("traces_fetch_recent")
+def traces_fetch_recent(service: str, start_iso: str, end_iso: str, limit: int = 100) -> dict:
+    meta, request_id = _tool_request_meta("traces.fetch_recent")
+    args = {
+        "service": service,
+        "start_iso": start_iso,
+        "end_iso": end_iso,
+        "limit": limit,
+    }
+    corr = audit.write("traces.fetch_recent", args, ok=True, meta=meta, correlation_id=request_id)
+
+    try:
+        traces = observability.fetch_traces(service, start_iso, end_iso, limit)
+    except ResilienceError as e:
+        audit.write("traces.fetch_recent.error", {"error": e.to_dict()}, ok=False)
+        return {"correlation_id": corr, "traces": [], "error": e.to_dict()}
+
+    return {"correlation_id": corr, "traces": traces}
+
+
+@mcp.tool()
+@_instrumented_tool("runbooks_search")
 def runbooks_search(query: str, limit: int = 5) -> dict:
+    meta, request_id = _tool_request_meta("runbooks.search")
     runbooks_dir = os.getenv("RUNBOOKS_DIR", CFG.runbooks_dir)
-    corr = audit.write("runbooks.search", {"query": query, "limit": limit, "runbooks_dir": runbooks_dir}, ok=True)
+    corr = audit.write(
+        "runbooks.search",
+        {"query": query, "limit": limit, "runbooks_dir": runbooks_dir},
+        ok=True,
+        meta=meta,
+        correlation_id=request_id,
+    )
     hits = search_local_runbooks(runbooks_dir, query, limit)
     return {"correlation_id": corr, "results": hits}
 
 
 @mcp.tool()
+@_instrumented_tool("ping")
 def ping(message: str = "hello") -> dict:
+    meta, request_id = _tool_request_meta("ping")
+    audit.write("ping", {"message": message}, ok=True, meta=meta, correlation_id=request_id)
     return {"ok": True, "message": message}
 
 
 @mcp.tool()
+@_instrumented_tool("mcp_health")
+def mcp_health() -> dict:
+    meta, request_id = _tool_request_meta("mcp.health")
+    corr = audit.write("mcp.health", {}, ok=True, meta=meta, correlation_id=request_id)
+    health = _http_health_payload()
+    health["correlation_id"] = corr
+    return health
+
+
+@mcp.tool()
+@_instrumented_tool("mcp_metrics")
+def mcp_metrics() -> dict:
+    meta, request_id = _tool_request_meta("mcp.metrics")
+    corr = audit.write("mcp.metrics", {}, ok=True, meta=meta, correlation_id=request_id)
+    snapshot = _http_metrics_payload()
+    snapshot["correlation_id"] = corr
+    return snapshot
+
+
+@mcp.tool()
+@_instrumented_tool("slack_post_update")
 def slack_post_update(
     incident_id: str,
     service: str | None = None,
@@ -379,6 +654,7 @@ def slack_post_update(
     Post an incident update to Slack via Incoming Webhook.
     Safe-by-default: dry_run=True returns payload without sending.
     """
+    meta, request_id = _tool_request_meta("slack.post_update")
     resolved_channel = (channel or os.getenv("SLACK_DEFAULT_CHANNEL") or "").strip() or None
     message = text or _build_slack_message(incident_id=incident_id, service=service, summary=summary, ticket=ticket)
     payload = {"text": message}
@@ -393,7 +669,22 @@ def slack_post_update(
             "dry_run": dry_run,
         },
         ok=True,
+        meta=meta,
+        correlation_id=request_id,
     )
+
+    if not dry_run:
+        try:
+            require_allowed("slack.post_update")
+        except Exception as e:
+            audit.write(
+                "slack.post_update.denied",
+                {"correlation_id": corr, "error": str(e)},
+                ok=False,
+                meta=meta,
+                correlation_id=corr,
+            )
+            raise
 
     if dry_run:
         return {
@@ -438,13 +729,17 @@ def slack_post_update(
         }
 
 
+@_instrumented_tool("airflow_trigger_incident_dag")
 def airflow_trigger_incident_dag(incident_id: str, service: str) -> dict:
+    meta, request_id = _tool_request_meta("airflow.trigger_incident_dag")
     dag_id = "incident_evidence_v1"
     conf = {"incident_id": incident_id, "service": service}
     corr = audit.write(
         "airflow.trigger_incident_dag",
         {"dag_id": dag_id, "conf": conf, "evidence_backend": _evidence_backend()},
         ok=True,
+        meta=meta,
+        correlation_id=request_id,
     )
 
     try:
@@ -461,11 +756,15 @@ def airflow_trigger_incident_dag(incident_id: str, service: str) -> dict:
         }
 
 
+@_instrumented_tool("airflow_get_incident_artifact")
 def airflow_get_incident_artifact(incident_id: str) -> dict:
+    meta, request_id = _tool_request_meta("airflow.get_incident_artifact")
     corr = audit.write(
         "airflow.get_incident_artifact",
         {"incident_id": incident_id, "evidence_backend": _evidence_backend()},
         ok=True,
+        meta=meta,
+        correlation_id=request_id,
     )
 
     if _evidence_backend() == "airflow":
@@ -489,9 +788,17 @@ def airflow_get_incident_artifact(incident_id: str) -> dict:
 
 
 @mcp.tool()
+@_instrumented_tool("evidence_get_bundle")
 def evidence_get_bundle(incident_id: str) -> dict:
+    meta, request_id = _tool_request_meta("evidence.get_bundle")
     backend = _evidence_backend()
-    corr = audit.write("evidence.get_bundle", {"incident_id": incident_id, "backend": backend}, ok=True)
+    corr = audit.write(
+        "evidence.get_bundle",
+        {"incident_id": incident_id, "backend": backend},
+        ok=True,
+        meta=meta,
+        correlation_id=request_id,
+    )
 
     if backend == "none":
         return {
@@ -534,11 +841,15 @@ def evidence_get_bundle(incident_id: str) -> dict:
 
 
 @mcp.tool()
+@_instrumented_tool("evidence_wait_for_bundle")
 def evidence_wait_for_bundle(incident_id: str, timeout_seconds: int = 30, poll_seconds: int = 2) -> dict:
+    meta, request_id = _tool_request_meta("evidence.wait_for_bundle")
     corr = audit.write(
         "evidence.wait_for_bundle",
         {"incident_id": incident_id, "timeout_seconds": timeout_seconds, "poll_seconds": poll_seconds},
         ok=True,
+        meta=meta,
+        correlation_id=request_id,
     )
 
     def _getter(iid: str) -> dict:
@@ -550,15 +861,19 @@ def evidence_wait_for_bundle(incident_id: str, timeout_seconds: int = 30, poll_s
 
 
 @mcp.tool()
+@_instrumented_tool("evidence_seed_sample")
 def evidence_seed_sample(incident_id: str, service: str, window_minutes: int = 30) -> dict:
     """
     Offline helper: writes a deterministic Evidence Bundle v1 JSON to EVIDENCE_DIR.
     """
+    meta, request_id = _tool_request_meta("evidence.seed_sample")
     window = max(1, int(window_minutes))
     corr = audit.write(
         "evidence.seed_sample",
         {"incident_id": incident_id, "service": service, "window_minutes": window},
         ok=True,
+        meta=meta,
+        correlation_id=request_id,
     )
 
     seed_offset = sum(ord(ch) for ch in f"{incident_id}:{service}") % (24 * 60)
@@ -632,11 +947,19 @@ def evidence_seed_sample(incident_id: str, service: str, window_minutes: int = 3
 
 
 @mcp.tool()
+@_instrumented_tool("incident_triage_summary")
 def incident_triage_summary(incident_id: str) -> dict:
     """
     Deterministic (non-LLM) summary of an incident from the Evidence Bundle.
     """
-    corr = audit.write("incident.triage_summary", {"incident_id": incident_id}, ok=True)
+    meta, request_id = _tool_request_meta("incident.triage_summary")
+    corr = audit.write(
+        "incident.triage_summary",
+        {"incident_id": incident_id},
+        ok=True,
+        meta=meta,
+        correlation_id=request_id,
+    )
     evidence = evidence_get_bundle(incident_id)
 
     if not evidence.get("found"):
@@ -651,9 +974,17 @@ def incident_triage_summary(incident_id: str) -> dict:
 
 
 @mcp.tool()
+@_instrumented_tool("jira_draft_ticket")
 def jira_draft_ticket(incident_id: str, project_key: str | None = None) -> dict:
+    meta, request_id = _tool_request_meta("jira.draft_ticket")
     resolved_project_key = _jira_project_key(project_key)
-    corr = audit.write("jira.draft_ticket", {"incident_id": incident_id, "project_key": resolved_project_key}, ok=True)
+    corr = audit.write(
+        "jira.draft_ticket",
+        {"incident_id": incident_id, "project_key": resolved_project_key},
+        ok=True,
+        meta=meta,
+        correlation_id=request_id,
+    )
 
     evidence = evidence_get_bundle(incident_id)
     if not evidence.get("found"):
@@ -673,6 +1004,7 @@ def jira_draft_ticket(incident_id: str, project_key: str | None = None) -> dict:
 
 
 @mcp.tool()
+@_instrumented_tool("jira_create_ticket")
 def jira_create_ticket(
     incident_id: str,
     project_key: str | None = None,
@@ -686,6 +1018,7 @@ def jira_create_ticket(
     - dry_run=True by default (no mutation)
     - dry_run=False requires reason + confirm_token + RBAC allow
     """
+    meta, request_id = _tool_request_meta("jira.create_ticket")
     tool_name = "jira.create_ticket"
     resolved_project_key = _jira_project_key(project_key)
     resolved_issue_type = _jira_issue_type()
@@ -702,6 +1035,8 @@ def jira_create_ticket(
             "provider": provider_name(),
         },
         ok=True,
+        meta=meta,
+        correlation_id=request_id,
     )
 
     require_allowed(tool_name)
@@ -795,9 +1130,17 @@ def jira_create_ticket(
 
 
 @mcp.tool()
+@_instrumented_tool("jira_list_projects")
 def jira_list_projects() -> dict:
+    meta, request_id = _tool_request_meta("jira.list_projects")
     provider = provider_name()
-    corr = audit.write("jira.list_projects", {"provider": provider}, ok=True)
+    corr = audit.write(
+        "jira.list_projects",
+        {"provider": provider},
+        ok=True,
+        meta=meta,
+        correlation_id=request_id,
+    )
 
     try:
         projects = get_provider().list_projects()
@@ -808,13 +1151,17 @@ def jira_list_projects() -> dict:
 
 
 @mcp.tool()
+@_instrumented_tool("jira_list_issue_types")
 def jira_list_issue_types(project_key: str | None = None) -> dict:
+    meta, request_id = _tool_request_meta("jira.list_issue_types")
     provider = provider_name()
     resolved_project_key = _jira_project_key(project_key)
     corr = audit.write(
         "jira.list_issue_types",
         {"provider": provider, "project_key": resolved_project_key},
         ok=True,
+        meta=meta,
+        correlation_id=request_id,
     )
 
     try:
@@ -839,8 +1186,16 @@ def jira_list_issue_types(project_key: str | None = None) -> dict:
 
 
 @mcp.tool()
+@_instrumented_tool("jira_validate_credentials")
 def jira_validate_credentials() -> dict:
-    corr = audit.write("jira.validate_credentials", {}, ok=True)
+    meta, request_id = _tool_request_meta("jira.validate_credentials")
+    corr = audit.write(
+        "jira.validate_credentials",
+        {},
+        ok=True,
+        meta=meta,
+        correlation_id=request_id,
+    )
 
     if provider_name() != "cloud":
         return {
@@ -864,6 +1219,9 @@ if _evidence_backend() == "airflow":
     # Airflow tools are discoverable only when explicitly requested.
     mcp.tool()(airflow_trigger_incident_dag)
     mcp.tool()(airflow_get_incident_artifact)
+
+
+_register_http_health_routes()
 
 
 def main() -> None:

@@ -9,6 +9,30 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class TestPackagingEntrypoints(unittest.TestCase):
+    def test_pyproject_declares_optional_aws_extra(self) -> None:
+        pyproject_text = (ROOT / "pyproject.toml").read_text(encoding="utf-8")
+
+        optional_block_match = re.search(
+            r"^\[project\.optional-dependencies\]\n(?P<body>(?:.+\n)+?)(?:\n\[|\Z)",
+            pyproject_text,
+            flags=re.MULTILINE,
+        )
+        self.assertIsNotNone(
+            optional_block_match,
+            "Missing [project.optional-dependencies] section in pyproject.toml",
+        )
+        optional_body = optional_block_match.group("body")
+        self.assertIn('aws = ["boto3>=1.34"]', optional_body)
+
+        dependencies_block_match = re.search(
+            r"^\[project\]\n(?P<body>(?:.+\n)+?)(?:\n\[|\Z)",
+            pyproject_text,
+            flags=re.MULTILINE,
+        )
+        self.assertIsNotNone(dependencies_block_match)
+        dependencies_body = dependencies_block_match.group("body")
+        self.assertNotIn('"boto3>=1.34"', dependencies_body)
+
     def test_pyproject_declares_console_scripts(self) -> None:
         pyproject_text = (ROOT / "pyproject.toml").read_text(encoding="utf-8")
         scripts_block_match = re.search(

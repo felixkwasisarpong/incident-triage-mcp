@@ -1,10 +1,19 @@
 from __future__ import annotations
-import os
-import json
-import boto3
-from typing import Any, Dict
 
-def read_evidence_bundle(incident_id: str) -> Dict[str, Any]:
+import json
+import os
+from typing import Any
+
+
+def read_evidence_bundle(incident_id: str) -> dict[str, Any]:
+    try:
+        import boto3  # type: ignore
+    except ModuleNotFoundError as exc:
+        raise RuntimeError(
+            "S3 evidence backend requires optional dependency 'boto3'. "
+            "Install with: pip install 'incident-triage-mcp[aws]'"
+        ) from exc
+
     bucket = os.getenv("S3_BUCKET", "triage-artifacts")
     key = f"evidence/v1/{incident_id}.json"
 

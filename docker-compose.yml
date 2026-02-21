@@ -110,6 +110,7 @@ services:
       AIRFLOW_ARTIFACT_DIR: /Users/Apple/Documents/Personal Projects/incident-triage-mcp/airflow/artifacts
 
       MCP_TRANSPORT: streamable-http
+      DEPLOYMENT_PROFILE: ${DEPLOYMENT_PROFILE:-local}
       AUDIT_PATH: /data/audit.jsonl
       MCP_HOST: 0.0.0.0
       MCP_PORT: "3333"
@@ -146,6 +147,7 @@ services:
     container_name: it_mcp_standalone
     environment:
       MCP_TRANSPORT: streamable-http
+      DEPLOYMENT_PROFILE: ${DEPLOYMENT_PROFILE:-local}
       MCP_HOST: 0.0.0.0
       MCP_PORT: "3333"
       AUDIT_PATH: /data/audit.jsonl

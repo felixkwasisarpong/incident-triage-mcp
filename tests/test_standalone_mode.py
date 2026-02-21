@@ -6,6 +6,7 @@ import sys
 import tempfile
 import types
 import unittest
+from contextlib import contextmanager
 from pathlib import Path
 from unittest.mock import patch
 
@@ -61,6 +62,33 @@ def _reload_server_module():
     return importlib.reload(server)
 
 
+@contextmanager
+def _without_boto3():
+    blocked_prefixes = ("boto3", "botocore")
+    removed: dict[str, object] = {}
+    for name in list(sys.modules):
+        if (
+            name == blocked_prefixes[0]
+            or name.startswith("boto3.")
+            or name == blocked_prefixes[1]
+            or name.startswith("botocore.")
+        ):
+            removed[name] = sys.modules.pop(name)
+
+    real_import = __import__
+
+    def _guarded_import(name, globals=None, locals=None, fromlist=(), level=0):
+        if name in blocked_prefixes or name.startswith("boto3.") or name.startswith("botocore."):
+            raise ModuleNotFoundError("No module named 'boto3'")
+        return real_import(name, globals, locals, fromlist, level)
+
+    try:
+        with patch("builtins.__import__", side_effect=_guarded_import):
+            yield
+    finally:
+        sys.modules.update(removed)
+
+
 class TestStandaloneMode(unittest.TestCase):
     def test_server_boots_with_minimal_env(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir, patch.dict(
@@ -75,6 +103,23 @@ class TestStandaloneMode(unittest.TestCase):
 
         self.assertIsNotNone(server.mcp)
         self.assertEqual(server._evidence_backend(), "fs")
+
+    def test_server_boots_without_boto3_when_aws_provider_not_selected(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir, patch.dict(
+            os.environ,
+            {
+                "MCP_TRANSPORT": "stdio",
+                "RUNBOOKS_DIR": tmpdir,
+                "ALERTS_PROVIDER": "mock",
+                "METRICS_PROVIDER": "mock",
+                "LOGS_PROVIDER": "mock",
+                "TRACES_PROVIDER": "mock",
+            },
+            clear=True,
+        ), _without_boto3():
+            server = _reload_server_module()
+
+        self.assertIsNotNone(server.mcp)
 
     def test_tools_list_excludes_airflow_tools_when_not_airflow_backend(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir, tempfile.TemporaryDirectory() as idempotency_tmp, patch.dict(

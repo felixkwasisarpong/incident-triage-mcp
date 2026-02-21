@@ -22,6 +22,9 @@ def _require(name: str) -> str:
 
 @dataclass(frozen=True)
 class AppConfig:
+    # Deployment profile
+    deployment_profile: str
+
     # MCP
     mcp_transport: str
     mcp_host: str
@@ -52,6 +55,14 @@ class AppConfig:
     logs_provider: str
     traces_provider: str
 
+    # HTTP auth boundary
+    http_auth_mode: str
+    http_api_key: Optional[str]
+    http_jwt_secret: Optional[str]
+    http_jwt_issuer: Optional[str]
+    http_jwt_audience: Optional[str]
+    http_jwt_leeway_seconds: int
+
     # Adapter resilience
     adapter_timeout_seconds: float
     adapter_retries: int
@@ -69,6 +80,7 @@ def load_config() -> AppConfig:
     evidence_backend = (_env("EVIDENCE_BACKEND") or artifact_store or "fs").lower()
 
     cfg = AppConfig(
+        deployment_profile=(_env("DEPLOYMENT_PROFILE", "local") or "local").lower(),
         mcp_transport=_env("MCP_TRANSPORT", "stdio") or "stdio",
         mcp_host=_env("MCP_HOST", "0.0.0.0") or "0.0.0.0",
         mcp_port=int(_env("MCP_PORT", "3333") or "3333"),
@@ -94,6 +106,13 @@ def load_config() -> AppConfig:
         logs_provider=(_env("LOGS_PROVIDER", "mock") or "mock").lower(),
         traces_provider=(_env("TRACES_PROVIDER", "mock") or "mock").lower(),
 
+        http_auth_mode=(_env("MCP_HTTP_AUTH_MODE", "none") or "none").lower(),
+        http_api_key=_env("MCP_HTTP_API_KEY"),
+        http_jwt_secret=_env("MCP_HTTP_JWT_SECRET"),
+        http_jwt_issuer=_env("MCP_HTTP_JWT_ISSUER"),
+        http_jwt_audience=_env("MCP_HTTP_JWT_AUDIENCE"),
+        http_jwt_leeway_seconds=int(_env("MCP_HTTP_JWT_LEEWAY_SECONDS", "30") or "30"),
+
         adapter_timeout_seconds=float(_env("ADAPTER_TIMEOUT_SECONDS", "5.0") or "5.0"),
         adapter_retries=int(_env("ADAPTER_RETRIES", "1") or "1"),
         adapter_backoff_seconds=float(_env("ADAPTER_BACKOFF_SECONDS", "0.15") or "0.15"),
@@ -108,6 +127,10 @@ def load_config() -> AppConfig:
         runbooks_dir=_env("RUNBOOKS_DIR", "./runbooks") or "./runbooks",
     )
 
+    # Validate deployment profile
+    if cfg.deployment_profile not in {"local", "staging", "prod"}:
+        raise ConfigError("DEPLOYMENT_PROFILE must be one of: local, staging, prod")
+
     # Validate audit
     if cfg.audit_mode not in {"stdout", "file"}:
         raise ConfigError("AUDIT_MODE must be 'stdout' or 'file'")
@@ -118,8 +141,11 @@ def load_config() -> AppConfig:
 
     # Validate provider flags
     provider_sets = {
-        "ALERTS_PROVIDER": (cfg.alerts_provider, {"mock", "datadog", "cloudwatch"}),
-        "METRICS_PROVIDER": (cfg.metrics_provider, {"mock", "datadog", "cloudwatch"}),
+        "ALERTS_PROVIDER": (
+            cfg.alerts_provider,
+            {"mock", "datadog", "cloudwatch", "prometheus", "pagerduty"},
+        ),
+        "METRICS_PROVIDER": (cfg.metrics_provider, {"mock", "datadog", "cloudwatch", "prometheus"}),
         "LOGS_PROVIDER": (cfg.logs_provider, {"mock", "datadog", "cloudwatch", "elk", "none"}),
         "TRACES_PROVIDER": (
             cfg.traces_provider,
@@ -130,6 +156,60 @@ def load_config() -> AppConfig:
         if value not in allowed:
             allowed_str = ", ".join(sorted(allowed))
             raise ConfigError(f"{env_name} must be one of: {allowed_str}")
+
+    # Validate HTTP auth settings
+    if cfg.http_auth_mode not in {"none", "api_key", "jwt_hs256"}:
+        raise ConfigError("MCP_HTTP_AUTH_MODE must be one of: none, api_key, jwt_hs256")
+    if cfg.http_auth_mode == "api_key" and not cfg.http_api_key:
+        raise ConfigError("MCP_HTTP_API_KEY is required when MCP_HTTP_AUTH_MODE=api_key")
+    if cfg.http_auth_mode == "jwt_hs256" and not cfg.http_jwt_secret:
+        raise ConfigError("MCP_HTTP_JWT_SECRET is required when MCP_HTTP_AUTH_MODE=jwt_hs256")
+    if cfg.http_jwt_leeway_seconds < 0:
+        raise ConfigError("MCP_HTTP_JWT_LEEWAY_SECONDS must be >= 0")
+
+    # Profile-aware security requirements
+    if cfg.deployment_profile in {"staging", "prod"}:
+        if cfg.mcp_transport == "streamable-http" and cfg.http_auth_mode == "none":
+            raise ConfigError(
+                "MCP_HTTP_AUTH_MODE cannot be 'none' in staging/prod when MCP_TRANSPORT=streamable-http"
+            )
+
+        selected_providers = {
+            cfg.alerts_provider,
+            cfg.metrics_provider,
+            cfg.logs_provider,
+            cfg.traces_provider,
+        }
+        provider_requirements: dict[str, list[str]] = {
+            "datadog": ["DATADOG_API_KEY", "DATADOG_APP_KEY"],
+            "prometheus": ["PROMETHEUS_BASE_URL"],
+            "pagerduty": ["PAGERDUTY_API_TOKEN"],
+            "elk": ["ELASTICSEARCH_BASE_URL"],
+        }
+        for provider, env_vars in provider_requirements.items():
+            if provider not in selected_providers:
+                continue
+            missing = [name for name in env_vars if not _env(name)]
+            if missing:
+                raise ConfigError(
+                    f"Missing required env vars for {provider} provider in {cfg.deployment_profile} profile: "
+                    + ", ".join(missing)
+                )
+
+    if cfg.deployment_profile == "prod":
+        if cfg.audit_mode != "stdout":
+            raise ConfigError("AUDIT_MODE must be 'stdout' in DEPLOYMENT_PROFILE=prod")
+        if cfg.alerts_provider == "mock" or cfg.metrics_provider == "mock":
+            raise ConfigError(
+                "ALERTS_PROVIDER and METRICS_PROVIDER cannot be 'mock' in DEPLOYMENT_PROFILE=prod"
+            )
+        if cfg.evidence_backend == "none":
+            raise ConfigError("EVIDENCE_BACKEND cannot be 'none' in DEPLOYMENT_PROFILE=prod")
+        idempotency_backend = (_env("IDEMPOTENCY_BACKEND", "file") or "file").strip().lower()
+        if idempotency_backend not in {"redis", "postgres", "postgresql"}:
+            raise ConfigError(
+                "IDEMPOTENCY_BACKEND must be redis or postgres in DEPLOYMENT_PROFILE=prod"
+            )
 
     # Validate resilience settings
     if cfg.adapter_timeout_seconds <= 0:

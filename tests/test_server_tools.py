@@ -134,6 +134,102 @@ class TestServerTools(unittest.TestCase):
         self.assertEqual(self.server.ping(), {"ok": True, "message": "hello"})
         self.assertEqual(self.server.ping("hi"), {"ok": True, "message": "hi"})
 
+    def test_ping_audit_meta_contains_auth_fields(self) -> None:
+        self.server.ping("meta-check")
+        self.assertGreaterEqual(len(self.audit_calls), 1)
+        meta = self.audit_calls[0]["meta"]
+        for key in ["transport", "auth_mode", "auth_required", "authenticated", "principal", "request_id"]:
+            self.assertIn(key, meta)
+
+    def test_mcp_health(self) -> None:
+        out = self.server.mcp_health()
+        self.assertEqual(out["correlation_id"], "corr-1")
+        self.assertTrue(out["ok"])
+        self.assertIn(out["status"], {"healthy", "degraded"})
+        self.assertIn("uptime_seconds", out)
+        self.assertIn("providers", out)
+        self.assertIn("transport", out)
+
+    def test_mcp_metrics_includes_tool_activity(self) -> None:
+        self.server.ping("probe")
+        out = self.server.mcp_metrics()
+        self.assertEqual(out["correlation_id"], "corr-2")
+        self.assertIn("totals", out)
+        self.assertGreaterEqual(out["totals"]["tool_calls_total"], 1)
+        self.assertIn("ping", out["tools"])
+        self.assertGreaterEqual(out["tools"]["ping"]["calls_total"], 1)
+
+    def test_http_health_payload_shape(self) -> None:
+        out = self.server._http_health_payload()
+        self.assertTrue(out["ok"])
+        self.assertIn("service", out)
+        self.assertIn("providers", out)
+        self.assertIn("transport", out)
+        self.assertIn("evidence_backend", out)
+        self.assertIn("airflow", out)
+
+    def test_http_metrics_payload_shape(self) -> None:
+        self.server.ping("metric-probe")
+        out = self.server._http_metrics_payload()
+        self.assertIn("service", out)
+        self.assertIn("totals", out)
+        self.assertIn("tools", out)
+        self.assertIn("providers", out)
+        self.assertIn("transport", out)
+        self.assertIn("evidence_backend", out)
+
+    def test_http_auth_api_key_denies_missing_header(self) -> None:
+        with patch.dict(
+            os.environ,
+            {
+                "MCP_TRANSPORT": "streamable-http",
+                "MCP_HTTP_AUTH_MODE": "api_key",
+                "MCP_HTTP_API_KEY": "test-api-key",
+            },
+            clear=False,
+        ):
+            server = self._reload_and_attach()
+            with self.assertRaises(server.HTTPAuthError):
+                server.ping("secure")
+
+    def test_http_auth_api_key_allows_valid_header(self) -> None:
+        with patch.dict(
+            os.environ,
+            {
+                "MCP_TRANSPORT": "streamable-http",
+                "MCP_HTTP_AUTH_MODE": "api_key",
+                "MCP_HTTP_API_KEY": "test-api-key",
+            },
+            clear=False,
+        ):
+            server = self._reload_and_attach()
+            with patch.object(
+                server,
+                "_request_headers",
+                return_value={
+                    "x-api-key": "test-api-key",
+                    "x-client-id": "staging-gateway",
+                    "x-request-id": "req-123",
+                },
+            ):
+                out = server.ping("secure")
+
+        self.assertEqual(out, {"ok": True, "message": "secure"})
+        self.assertEqual(self.audit_calls[0]["meta"]["authenticated"], True)
+        self.assertEqual(self.audit_calls[0]["meta"]["principal"], "staging-gateway")
+        self.assertEqual(self.audit_calls[0]["meta"]["request_id"], "req-123")
+
+    def test_request_headers_handles_missing_request_context(self) -> None:
+        class _ContextWithoutRequest:
+            @property
+            def request_context(self):
+                raise ValueError("Context is not available outside of a request")
+
+        with patch.object(self.server.mcp, "get_context", return_value=_ContextWithoutRequest(), create=True):
+            headers = self.server._request_headers()
+
+        self.assertEqual(headers, {})
+
     def test_slack_post_update_dry_run(self) -> None:
         out = self.server.slack_post_update(
             incident_id="INC-100",
@@ -180,6 +276,19 @@ class TestServerTools(unittest.TestCase):
         self.assertIn("INC-102", payload["text"])
         self.assertTrue(out["posted"])
         self.assertFalse(out["dry_run"])
+
+    def test_slack_post_update_live_rbac_denied(self) -> None:
+        with patch.dict(os.environ, {"MCP_ROLE": "triager"}, clear=False):
+            server = self._reload_and_attach()
+            with patch.object(server.requests, "post") as post_mock:
+                with self.assertRaises(RuntimeError):
+                    server.slack_post_update(
+                        incident_id="INC-103",
+                        service="payments-api",
+                        dry_run=False,
+                    )
+
+        post_mock.assert_not_called()
 
     def test_incident_triage_run(self) -> None:
         with patch.object(self.server, "triage_incident_run", return_value={"status": "ok"}) as run_mock:
@@ -311,6 +420,68 @@ class TestServerTools(unittest.TestCase):
 
         snap_mock.assert_called_once_with("payments-api", "start", "end")
         self.assertEqual(out, {"correlation_id": "corr-1", "snapshot": snapshot})
+
+    def test_logs_fetch_recent(self) -> None:
+        logs = [
+            {"timestamp": "2026-01-01T00:01:00Z", "message": "timeout", "level": "error"},
+            {"timestamp": "2026-01-01T00:00:30Z", "message": "retrying", "level": "warning"},
+        ]
+        with patch.object(self.server.observability, "fetch_logs", return_value=logs) as logs_mock:
+            out = self.server.logs_fetch_recent("payments-api", "start", "end", limit=50)
+
+        logs_mock.assert_called_once_with("payments-api", "start", "end", 50)
+        self.assertEqual(out["correlation_id"], "corr-1")
+        self.assertEqual(out["logs"], logs)
+
+    def test_logs_fetch_recent_handles_resilience_error(self) -> None:
+        err = self.server.ResilienceError(
+            provider="elk",
+            operation="fetch_logs",
+            kind="adapter_call_failed",
+            message="elk.fetch_logs failed after 1 attempt(s)",
+            attempts=1,
+            retriable=True,
+            cause=RuntimeError("index not found"),
+        )
+        with patch.object(self.server.observability, "fetch_logs", side_effect=err):
+            out = self.server.logs_fetch_recent("payments-api", "start", "end", limit=10)
+
+        self.assertEqual(out["correlation_id"], "corr-1")
+        self.assertEqual(out["logs"], [])
+        self.assertIn("error", out)
+        self.assertEqual(out["error"]["operation"], "fetch_logs")
+        self.assertEqual(out["error"]["provider"], "elk")
+
+    def test_traces_fetch_recent(self) -> None:
+        traces = [
+            {"trace_id": "trc-1", "status": "error", "duration_ms": 840},
+            {"trace_id": "trc-2", "status": "ok", "duration_ms": 220},
+        ]
+        with patch.object(self.server.observability, "fetch_traces", return_value=traces) as traces_mock:
+            out = self.server.traces_fetch_recent("payments-api", "start", "end", limit=25)
+
+        traces_mock.assert_called_once_with("payments-api", "start", "end", 25)
+        self.assertEqual(out["correlation_id"], "corr-1")
+        self.assertEqual(out["traces"], traces)
+
+    def test_traces_fetch_recent_handles_resilience_error(self) -> None:
+        err = self.server.ResilienceError(
+            provider="xray",
+            operation="fetch_traces",
+            kind="adapter_call_failed",
+            message="xray.fetch_traces failed after 1 attempt(s)",
+            attempts=1,
+            retriable=True,
+            cause=RuntimeError("missing permission"),
+        )
+        with patch.object(self.server.observability, "fetch_traces", side_effect=err):
+            out = self.server.traces_fetch_recent("payments-api", "start", "end", limit=10)
+
+        self.assertEqual(out["correlation_id"], "corr-1")
+        self.assertEqual(out["traces"], [])
+        self.assertIn("error", out)
+        self.assertEqual(out["error"]["operation"], "fetch_traces")
+        self.assertEqual(out["error"]["provider"], "xray")
 
     def test_runbooks_search(self) -> None:
         hits = [{"title": "restart payment workers", "score": 0.88}]
