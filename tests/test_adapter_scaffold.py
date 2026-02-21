@@ -37,6 +37,11 @@ class TestAdapterScaffold(unittest.TestCase):
             with self.assertRaises(ConfigError):
                 load_config()
 
+    def test_config_rejects_invalid_notify_provider_flag(self) -> None:
+        with patch.dict(os.environ, {"NOTIFY_PROVIDER": "discord"}, clear=True):
+            with self.assertRaises(ConfigError):
+                load_config()
+
     def test_config_rejects_invalid_resilience_values(self) -> None:
         with patch.dict(os.environ, {"ADAPTER_TIMEOUT_SECONDS": "0"}, clear=True):
             with self.assertRaises(ConfigError):

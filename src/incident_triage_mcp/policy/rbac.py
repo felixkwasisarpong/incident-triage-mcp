@@ -10,7 +10,7 @@ ROLE = os.getenv("MCP_ROLE", "viewer").lower()
 ROLE_ALLOW = {
     "viewer": set(),
     "triager": {"jira.draft_ticket"},
-    "responder": {"jira.draft_ticket", "jira.create_ticket", "slack.post_update"},
+    "responder": {"jira.draft_ticket", "jira.create_ticket", "slack.post_update", "teams.post_update"},
     "admin": {"*"},
 }
 

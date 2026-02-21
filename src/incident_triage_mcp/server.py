@@ -21,6 +21,10 @@ from incident_triage_mcp.adapters.registry import build_observability_registry
 from incident_triage_mcp.adapters.resilience import ResilienceError, ResiliencePolicy
 from incident_triage_mcp.adapters.runbooks_local import RunbooksLocal
 from incident_triage_mcp.adapters.artifacts_s3 import read_evidence_bundle
+from incident_triage_mcp.adapters.teams_webhook import (
+    build_teams_message_card,
+    post_teams_webhook,
+)
 from incident_triage_mcp.audit import AuditLog
 from incident_triage_mcp.config import ConfigError, load_config
 from incident_triage_mcp.domain_models import EvidenceBundle
@@ -383,6 +387,18 @@ def _jira_issue_type() -> str:
     return resolved or "Task"
 
 
+def _notify_provider(provider: str | None = None) -> str:
+    resolved = (
+        provider
+        or os.getenv("NOTIFY_PROVIDER")
+        or CFG.notify_provider
+        or "slack"
+    ).strip().lower()
+    if resolved in {"slack", "teams"}:
+        return resolved
+    return "slack"
+
+
 def _normalized_idempotency_key(idempotency_key: str | None) -> str | None:
     if not idempotency_key:
         return None
@@ -435,6 +451,7 @@ def incident_triage_run(
     include_ticket: bool = False,
     project_key: str | None = None,
     notify_slack: bool = False,
+    notify_provider: str | None = None,
     slack_channel: str | None = None,
     slack_dry_run: bool = True,
 ) -> dict:
@@ -444,6 +461,7 @@ def incident_triage_run(
     """
     meta, request_id = _tool_request_meta("incident.triage_run")
     resolved_project_key = _jira_project_key(project_key)
+    resolved_notify_provider = _notify_provider(notify_provider)
     corr = audit.write(
         "incident.triage_run",
         {
@@ -452,6 +470,7 @@ def incident_triage_run(
             "include_ticket": include_ticket,
             "project_key": resolved_project_key if include_ticket else None,
             "notify_slack": notify_slack,
+            "notify_provider": resolved_notify_provider if notify_slack else None,
             "slack_channel": slack_channel,
             "slack_dry_run": slack_dry_run,
             "evidence_backend": _evidence_backend(),
@@ -491,17 +510,28 @@ def incident_triage_run(
     )
 
     if notify_slack:
+        target = resolved_notify_provider
         try:
-            result["slack"] = slack_post_update(
-                incident_id=incident_id,
-                service=service,
-                summary=result.get("summary"),
-                ticket=result.get("ticket"),
-                channel=slack_channel,
-                dry_run=slack_dry_run,
-            )
+            if target == "teams":
+                result["teams"] = teams_post_update(
+                    incident_id=incident_id,
+                    service=service,
+                    summary=result.get("summary"),
+                    ticket=result.get("ticket"),
+                    channel=slack_channel,
+                    dry_run=slack_dry_run,
+                )
+            else:
+                result["slack"] = slack_post_update(
+                    incident_id=incident_id,
+                    service=service,
+                    summary=result.get("summary"),
+                    ticket=result.get("ticket"),
+                    channel=slack_channel,
+                    dry_run=slack_dry_run,
+                )
         except Exception as e:
-            result["slack"] = {
+            result[target] = {
                 "posted": False,
                 "dry_run": slack_dry_run,
                 "error": str(e),
@@ -719,6 +749,98 @@ def slack_post_update(
         }
     except Exception as e:
         audit.write("slack.post_update.error", {"correlation_id": corr, "error": str(e)}, ok=False)
+        return {
+            "correlation_id": corr,
+            "posted": False,
+            "dry_run": False,
+            "channel": resolved_channel,
+            "error": str(e),
+            "payload": payload,
+        }
+
+
+@mcp.tool()
+@_instrumented_tool("teams_post_update")
+def teams_post_update(
+    incident_id: str,
+    service: str | None = None,
+    summary: dict | None = None,
+    ticket: dict | None = None,
+    channel: str | None = None,
+    dry_run: bool = True,
+    text: str | None = None,
+) -> dict:
+    """
+    Post an incident update to Microsoft Teams via Incoming Webhook.
+    Safe-by-default: dry_run=True returns payload without sending.
+    """
+    meta, request_id = _tool_request_meta("teams.post_update")
+    resolved_channel = (channel or os.getenv("TEAMS_DEFAULT_CHANNEL") or "").strip() or None
+    message = text or _build_slack_message(incident_id=incident_id, service=service, summary=summary, ticket=ticket)
+    payload = build_teams_message_card(
+        title=f"Incident Update {incident_id}",
+        message=message,
+    )
+    if resolved_channel:
+        payload["summary"] = f"Incident Update {incident_id} ({resolved_channel})"
+
+    corr = audit.write(
+        "teams.post_update.request",
+        {
+            "incident_id": incident_id,
+            "channel": resolved_channel,
+            "dry_run": dry_run,
+        },
+        ok=True,
+        meta=meta,
+        correlation_id=request_id,
+    )
+
+    if not dry_run:
+        try:
+            require_allowed("teams.post_update")
+        except Exception as e:
+            audit.write(
+                "teams.post_update.denied",
+                {"correlation_id": corr, "error": str(e)},
+                ok=False,
+                meta=meta,
+                correlation_id=corr,
+            )
+            raise
+
+    if dry_run:
+        return {
+            "correlation_id": corr,
+            "posted": False,
+            "dry_run": True,
+            "channel": resolved_channel,
+            "payload": payload,
+        }
+
+    webhook = os.getenv("TEAMS_WEBHOOK_URL")
+    if not webhook:
+        err = "TEAMS_WEBHOOK_URL is not set. Configure it or call with dry_run=true."
+        audit.write("teams.post_update.error", {"correlation_id": corr, "error": err}, ok=False)
+        return {
+            "correlation_id": corr,
+            "posted": False,
+            "dry_run": False,
+            "channel": resolved_channel,
+            "error": err,
+            "payload": payload,
+        }
+
+    try:
+        post_teams_webhook(webhook, payload, timeout_seconds=15.0)
+        return {
+            "correlation_id": corr,
+            "posted": True,
+            "dry_run": False,
+            "channel": resolved_channel,
+        }
+    except Exception as e:
+        audit.write("teams.post_update.error", {"correlation_id": corr, "error": str(e)}, ok=False)
         return {
             "correlation_id": corr,
             "posted": False,

@@ -27,6 +27,7 @@ CORE_TOOLS = {
     "mcp_health",
     "mcp_metrics",
     "slack_post_update",
+    "teams_post_update",
     "evidence_get_bundle",
     "evidence_wait_for_bundle",
     "evidence_seed_sample",
