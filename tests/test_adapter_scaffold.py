@@ -31,6 +31,16 @@ class TestAdapterScaffold(unittest.TestCase):
             with self.assertRaises(ConfigError):
                 load_config()
 
+    def test_config_rejects_http_api_key_mode_without_key(self) -> None:
+        with patch.dict(os.environ, {"MCP_HTTP_AUTH_MODE": "api_key"}, clear=True):
+            with self.assertRaises(ConfigError):
+                load_config()
+
+    def test_config_rejects_http_jwt_mode_without_secret(self) -> None:
+        with patch.dict(os.environ, {"MCP_HTTP_AUTH_MODE": "jwt_hs256"}, clear=True):
+            with self.assertRaises(ConfigError):
+                load_config()
+
     def test_registry_mock_provider_works(self) -> None:
         registry = build_observability_registry(
             alerts_provider="mock",

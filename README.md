@@ -128,6 +128,16 @@ MCP_TRANSPORT=stdio|streamable-http
 MCP_HOST=0.0.0.0
 MCP_PORT=3333
 
+# HTTP auth boundary (applies only when MCP_TRANSPORT=streamable-http)
+MCP_HTTP_AUTH_MODE=none|api_key|jwt_hs256
+MCP_HTTP_API_KEY=<required-when-mode-is-api_key>
+MCP_HTTP_JWT_SECRET=<required-when-mode-is-jwt_hs256>
+MCP_HTTP_JWT_ISSUER=<optional-expected-iss-claim>
+MCP_HTTP_JWT_AUDIENCE=<optional-expected-aud-claim>
+MCP_HTTP_JWT_LEEWAY_SECONDS=30
+# Optional request correlation headers from caller:
+#   x-request-id or x-correlation-id
+
 # Audit logging (k8s-friendly)
 AUDIT_MODE=stdout|file         # default: stdout
 AUDIT_PATH=/data/audit.jsonl   # only used when AUDIT_MODE=file
@@ -474,6 +484,7 @@ Typical demo sequence:
 
 Notes:
 - Non-dry-run is blocked unless **RBAC** allows it (`MCP_ROLE=responder|admin`) and `CONFIRM_TOKEN` is provided.
+- Non-dry-run Slack posts are also RBAC-gated (`slack.post_update`, allowed for `MCP_ROLE=responder|admin`).
 - Swap providers via env: `JIRA_PROVIDER=mock` (demo) or `JIRA_PROVIDER=cloud` (real Jira Cloud).
 - `JIRA_ISSUE_TYPE` defaults to `Task` (used for creates unless overridden in code).
 - Jira Cloud descriptions are sent as ADF and render section headers/bullets/inline formatting in the Jira UI.

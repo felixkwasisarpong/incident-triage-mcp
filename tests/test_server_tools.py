@@ -134,6 +134,54 @@ class TestServerTools(unittest.TestCase):
         self.assertEqual(self.server.ping(), {"ok": True, "message": "hello"})
         self.assertEqual(self.server.ping("hi"), {"ok": True, "message": "hi"})
 
+    def test_ping_audit_meta_contains_auth_fields(self) -> None:
+        self.server.ping("meta-check")
+        self.assertGreaterEqual(len(self.audit_calls), 1)
+        meta = self.audit_calls[0]["meta"]
+        for key in ["transport", "auth_mode", "auth_required", "authenticated", "principal", "request_id"]:
+            self.assertIn(key, meta)
+
+    def test_http_auth_api_key_denies_missing_header(self) -> None:
+        with patch.dict(
+            os.environ,
+            {
+                "MCP_TRANSPORT": "streamable-http",
+                "MCP_HTTP_AUTH_MODE": "api_key",
+                "MCP_HTTP_API_KEY": "test-api-key",
+            },
+            clear=False,
+        ):
+            server = self._reload_and_attach()
+            with self.assertRaises(server.HTTPAuthError):
+                server.ping("secure")
+
+    def test_http_auth_api_key_allows_valid_header(self) -> None:
+        with patch.dict(
+            os.environ,
+            {
+                "MCP_TRANSPORT": "streamable-http",
+                "MCP_HTTP_AUTH_MODE": "api_key",
+                "MCP_HTTP_API_KEY": "test-api-key",
+            },
+            clear=False,
+        ):
+            server = self._reload_and_attach()
+            with patch.object(
+                server,
+                "_request_headers",
+                return_value={
+                    "x-api-key": "test-api-key",
+                    "x-client-id": "staging-gateway",
+                    "x-request-id": "req-123",
+                },
+            ):
+                out = server.ping("secure")
+
+        self.assertEqual(out, {"ok": True, "message": "secure"})
+        self.assertEqual(self.audit_calls[0]["meta"]["authenticated"], True)
+        self.assertEqual(self.audit_calls[0]["meta"]["principal"], "staging-gateway")
+        self.assertEqual(self.audit_calls[0]["meta"]["request_id"], "req-123")
+
     def test_slack_post_update_dry_run(self) -> None:
         out = self.server.slack_post_update(
             incident_id="INC-100",
@@ -180,6 +228,19 @@ class TestServerTools(unittest.TestCase):
         self.assertIn("INC-102", payload["text"])
         self.assertTrue(out["posted"])
         self.assertFalse(out["dry_run"])
+
+    def test_slack_post_update_live_rbac_denied(self) -> None:
+        with patch.dict(os.environ, {"MCP_ROLE": "triager"}, clear=False):
+            server = self._reload_and_attach()
+            with patch.object(server.requests, "post") as post_mock:
+                with self.assertRaises(RuntimeError):
+                    server.slack_post_update(
+                        incident_id="INC-103",
+                        service="payments-api",
+                        dry_run=False,
+                    )
+
+        post_mock.assert_not_called()
 
     def test_incident_triage_run(self) -> None:
         with patch.object(self.server, "triage_incident_run", return_value={"status": "ok"}) as run_mock:

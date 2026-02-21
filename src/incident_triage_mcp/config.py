@@ -52,6 +52,14 @@ class AppConfig:
     logs_provider: str
     traces_provider: str
 
+    # HTTP auth boundary
+    http_auth_mode: str
+    http_api_key: Optional[str]
+    http_jwt_secret: Optional[str]
+    http_jwt_issuer: Optional[str]
+    http_jwt_audience: Optional[str]
+    http_jwt_leeway_seconds: int
+
     # Adapter resilience
     adapter_timeout_seconds: float
     adapter_retries: int
@@ -94,6 +102,13 @@ def load_config() -> AppConfig:
         logs_provider=(_env("LOGS_PROVIDER", "mock") or "mock").lower(),
         traces_provider=(_env("TRACES_PROVIDER", "mock") or "mock").lower(),
 
+        http_auth_mode=(_env("MCP_HTTP_AUTH_MODE", "none") or "none").lower(),
+        http_api_key=_env("MCP_HTTP_API_KEY"),
+        http_jwt_secret=_env("MCP_HTTP_JWT_SECRET"),
+        http_jwt_issuer=_env("MCP_HTTP_JWT_ISSUER"),
+        http_jwt_audience=_env("MCP_HTTP_JWT_AUDIENCE"),
+        http_jwt_leeway_seconds=int(_env("MCP_HTTP_JWT_LEEWAY_SECONDS", "30") or "30"),
+
         adapter_timeout_seconds=float(_env("ADAPTER_TIMEOUT_SECONDS", "5.0") or "5.0"),
         adapter_retries=int(_env("ADAPTER_RETRIES", "1") or "1"),
         adapter_backoff_seconds=float(_env("ADAPTER_BACKOFF_SECONDS", "0.15") or "0.15"),
@@ -133,6 +148,16 @@ def load_config() -> AppConfig:
         if value not in allowed:
             allowed_str = ", ".join(sorted(allowed))
             raise ConfigError(f"{env_name} must be one of: {allowed_str}")
+
+    # Validate HTTP auth settings
+    if cfg.http_auth_mode not in {"none", "api_key", "jwt_hs256"}:
+        raise ConfigError("MCP_HTTP_AUTH_MODE must be one of: none, api_key, jwt_hs256")
+    if cfg.http_auth_mode == "api_key" and not cfg.http_api_key:
+        raise ConfigError("MCP_HTTP_API_KEY is required when MCP_HTTP_AUTH_MODE=api_key")
+    if cfg.http_auth_mode == "jwt_hs256" and not cfg.http_jwt_secret:
+        raise ConfigError("MCP_HTTP_JWT_SECRET is required when MCP_HTTP_AUTH_MODE=jwt_hs256")
+    if cfg.http_jwt_leeway_seconds < 0:
+        raise ConfigError("MCP_HTTP_JWT_LEEWAY_SECONDS must be >= 0")
 
     # Validate resilience settings
     if cfg.adapter_timeout_seconds <= 0:
