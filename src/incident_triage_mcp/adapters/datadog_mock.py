@@ -53,3 +53,28 @@ class DatadogMock:
                 }
             )
         return out
+
+    def fetch_traces(
+        self, service: str, start_iso: str, end_iso: str, limit: int = 100
+    ) -> List[Dict[str, Any]]:
+        size = max(0, min(limit, 100))
+        out: List[Dict[str, Any]] = []
+        now = datetime.now(timezone.utc)
+        for idx in range(size):
+            out.append(
+                {
+                    "trace_id": f"trc-{idx:04d}",
+                    "service": service,
+                    "status": "error" if idx % 4 == 0 else "ok",
+                    "start_time_iso": (now - timedelta(seconds=idx * 7)).isoformat(),
+                    "duration_ms": 120 + (idx % 5) * 25,
+                    "response_time_ms": 100 + (idx % 7) * 20,
+                    "fault": idx % 11 == 0,
+                    "error": idx % 4 == 0,
+                    "throttle": False,
+                    "root_segment": "POST /checkout",
+                    "http_method": "POST",
+                    "http_url": "https://payments.example/checkout",
+                }
+            )
+        return out

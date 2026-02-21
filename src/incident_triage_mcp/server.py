@@ -372,6 +372,25 @@ def logs_fetch_recent(service: str, start_iso: str, end_iso: str, limit: int = 1
 
 
 @mcp.tool()
+def traces_fetch_recent(service: str, start_iso: str, end_iso: str, limit: int = 100) -> dict:
+    args = {
+        "service": service,
+        "start_iso": start_iso,
+        "end_iso": end_iso,
+        "limit": limit,
+    }
+    corr = audit.write("traces.fetch_recent", args, ok=True)
+
+    try:
+        traces = observability.fetch_traces(service, start_iso, end_iso, limit)
+    except ResilienceError as e:
+        audit.write("traces.fetch_recent.error", {"error": e.to_dict()}, ok=False)
+        return {"correlation_id": corr, "traces": [], "error": e.to_dict()}
+
+    return {"correlation_id": corr, "traces": traces}
+
+
+@mcp.tool()
 def runbooks_search(query: str, limit: int = 5) -> dict:
     runbooks_dir = os.getenv("RUNBOOKS_DIR", CFG.runbooks_dir)
     corr = audit.write("runbooks.search", {"query": query, "limit": limit, "runbooks_dir": runbooks_dir}, ok=True)

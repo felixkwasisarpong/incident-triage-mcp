@@ -56,6 +56,13 @@ class TestAdapterScaffold(unittest.TestCase):
 
         logs = registry.fetch_logs("payments-api", "2026-01-01T00:00:00Z", "2026-01-01T00:30:00Z", limit=50)
         self.assertEqual(logs, [])
+        traces = registry.fetch_traces(
+            "payments-api",
+            "2026-01-01T00:00:00Z",
+            "2026-01-01T00:30:00Z",
+            limit=50,
+        )
+        self.assertEqual(traces, [])
 
     def test_registry_unimplemented_provider_returns_normalized_error(self) -> None:
         registry = build_observability_registry(

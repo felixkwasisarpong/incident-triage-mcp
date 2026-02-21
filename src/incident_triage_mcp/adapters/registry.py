@@ -17,6 +17,7 @@ from incident_triage_mcp.adapters.elk_logs_real import ElkLogsAPI
 from incident_triage_mcp.adapters.pagerduty_real import PagerDutyAPI
 from incident_triage_mcp.adapters.prometheus_real import PrometheusAPI
 from incident_triage_mcp.adapters.resilience import ResiliencePolicy, ResilienceRunner
+from incident_triage_mcp.adapters.xray_real import XRayAPI
 from incident_triage_mcp.secrets.loader import SecretsLoader
 
 
@@ -97,6 +98,7 @@ def _register_builtin_providers() -> None:
     register_observability_provider("prometheus", lambda secrets: PrometheusAPI(secrets))
     register_observability_provider("pagerduty", lambda secrets: PagerDutyAPI(secrets))
     register_observability_provider("elk", lambda secrets: ElkLogsAPI(secrets))
+    register_observability_provider("xray", lambda secrets: XRayAPI(secrets))
     register_observability_provider("none", lambda _secrets: _DisabledObservabilityAdapter("none"))
 
 

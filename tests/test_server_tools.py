@@ -343,6 +343,37 @@ class TestServerTools(unittest.TestCase):
         self.assertEqual(out["error"]["operation"], "fetch_logs")
         self.assertEqual(out["error"]["provider"], "elk")
 
+    def test_traces_fetch_recent(self) -> None:
+        traces = [
+            {"trace_id": "trc-1", "status": "error", "duration_ms": 840},
+            {"trace_id": "trc-2", "status": "ok", "duration_ms": 220},
+        ]
+        with patch.object(self.server.observability, "fetch_traces", return_value=traces) as traces_mock:
+            out = self.server.traces_fetch_recent("payments-api", "start", "end", limit=25)
+
+        traces_mock.assert_called_once_with("payments-api", "start", "end", 25)
+        self.assertEqual(out["correlation_id"], "corr-1")
+        self.assertEqual(out["traces"], traces)
+
+    def test_traces_fetch_recent_handles_resilience_error(self) -> None:
+        err = self.server.ResilienceError(
+            provider="xray",
+            operation="fetch_traces",
+            kind="adapter_call_failed",
+            message="xray.fetch_traces failed after 1 attempt(s)",
+            attempts=1,
+            retriable=True,
+            cause=RuntimeError("missing permission"),
+        )
+        with patch.object(self.server.observability, "fetch_traces", side_effect=err):
+            out = self.server.traces_fetch_recent("payments-api", "start", "end", limit=10)
+
+        self.assertEqual(out["correlation_id"], "corr-1")
+        self.assertEqual(out["traces"], [])
+        self.assertIn("error", out)
+        self.assertEqual(out["error"]["operation"], "fetch_traces")
+        self.assertEqual(out["error"]["provider"], "xray")
+
     def test_runbooks_search(self) -> None:
         hits = [{"title": "restart payment workers", "score": 0.88}]
         with patch.object(self.server, "search_local_runbooks", return_value=hits) as search_mock:

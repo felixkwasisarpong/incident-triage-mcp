@@ -21,6 +21,7 @@ CORE_TOOLS = {
     "alerts_fetch_active",
     "service_health_snapshot",
     "logs_fetch_recent",
+    "traces_fetch_recent",
     "runbooks_search",
     "ping",
     "slack_post_update",

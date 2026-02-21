@@ -221,6 +221,12 @@ ELASTICSEARCH_USERNAME=<optional-basic-auth-username>
 ELASTICSEARCH_PASSWORD=<optional-basic-auth-password>
 ELASTICSEARCH_HTTP_TIMEOUT_SECONDS=10
 
+# X-Ray settings (used when TRACES_PROVIDER=xray)
+# Auth can come from env credentials below or IAM role/default AWS credential chain.
+XRAY_REGION=us-east-1
+AWS_ACCESS_KEY_ID=<optional-static-key>
+AWS_SECRET_ACCESS_KEY=<optional-static-secret>
+
 # Secrets loader
 SECRET_PROVIDER=env|secret-manager
 ```
@@ -421,6 +427,8 @@ Typical demo sequence:
    - `incident_triage_summary(incident_id="INC-123")`
 3.5) Optional log pull for the same window:
    - `logs_fetch_recent(service="payments-api", start_iso="2026-01-01T00:00:00Z", end_iso="2026-01-01T00:30:00Z", limit=50)`
+3.6) Optional trace pull for the same window:
+   - `traces_fetch_recent(service="payments-api", start_iso="2026-01-01T00:00:00Z", end_iso="2026-01-01T00:30:00Z", limit=25)`
 4) Optional one-call orchestration (safe ticket dry-run hook):
    - `incident_triage_run(incident_id="INC-123", service="payments-api", include_ticket=true)`
    - Override project key for the ticket hook: `incident_triage_run(incident_id="INC-123", service="payments-api", include_ticket=true, project_key="PAY")`
