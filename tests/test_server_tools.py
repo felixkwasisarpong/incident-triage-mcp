@@ -182,6 +182,17 @@ class TestServerTools(unittest.TestCase):
         self.assertEqual(self.audit_calls[0]["meta"]["principal"], "staging-gateway")
         self.assertEqual(self.audit_calls[0]["meta"]["request_id"], "req-123")
 
+    def test_request_headers_handles_missing_request_context(self) -> None:
+        class _ContextWithoutRequest:
+            @property
+            def request_context(self):
+                raise ValueError("Context is not available outside of a request")
+
+        with patch.object(self.server.mcp, "get_context", return_value=_ContextWithoutRequest(), create=True):
+            headers = self.server._request_headers()
+
+        self.assertEqual(headers, {})
+
     def test_slack_post_update_dry_run(self) -> None:
         out = self.server.slack_post_update(
             incident_id="INC-100",

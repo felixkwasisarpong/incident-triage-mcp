@@ -87,7 +87,11 @@ def _request_headers() -> dict[str, str]:
         ctx = get_context()
     except Exception:
         return {}
-    request_context = getattr(ctx, "request_context", None)
+    try:
+        request_context = getattr(ctx, "request_context", None)
+    except Exception:
+        # FastMCP can raise outside an active request context.
+        return {}
     request = getattr(request_context, "request", None) if request_context is not None else None
     headers = getattr(request, "headers", None)
     if not headers:
