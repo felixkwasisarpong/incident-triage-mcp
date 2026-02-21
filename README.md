@@ -216,7 +216,7 @@ SLACK_DEFAULT_CHANNEL=#incident-triage
 
 # Teams notifications (used when NOTIFY_PROVIDER=teams)
 TEAMS_WEBHOOK_URL=https://outlook.office.com/webhook/...
-TEAMS_DEFAULT_CHANNEL=Incident Triage
+TEAMS_DEFAULT_CHANNEL="Incident Triage"
 
 # Idempotency storage for ticket create retries
 # file (default) keeps local/dev behavior; redis/postgres are durable backends for prod.
