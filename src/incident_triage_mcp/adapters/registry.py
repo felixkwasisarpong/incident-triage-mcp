@@ -144,6 +144,14 @@ def _register_builtin_providers() -> None:
         ),
     )
     register_observability_provider(
+        "opsgenie",
+        _lazy_provider_factory(
+            "incident_triage_mcp.adapters.opsgenie_real",
+            "OpsgenieAPI",
+            "opsgenie",
+        ),
+    )
+    register_observability_provider(
         "elk",
         _lazy_provider_factory(
             "incident_triage_mcp.adapters.elk_logs_real",

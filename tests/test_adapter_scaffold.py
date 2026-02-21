@@ -73,6 +73,19 @@ class TestAdapterScaffold(unittest.TestCase):
             with self.assertRaises(ConfigError):
                 load_config()
 
+    def test_staging_requires_opsgenie_secret_when_selected(self) -> None:
+        with patch.dict(
+            os.environ,
+            {
+                "DEPLOYMENT_PROFILE": "staging",
+                "MCP_TRANSPORT": "stdio",
+                "ALERTS_PROVIDER": "opsgenie",
+            },
+            clear=True,
+        ):
+            with self.assertRaises(ConfigError):
+                load_config()
+
     def test_prod_requires_durable_idempotency_backend(self) -> None:
         with patch.dict(
             os.environ,
@@ -172,6 +185,23 @@ class TestAdapterScaffold(unittest.TestCase):
         self.assertEqual(ctx.exception.kind, "adapter_call_failed")
         self.assertEqual(ctx.exception.provider, "newrelic")
         self.assertIn("not implemented", str(ctx.exception.cause))
+
+    def test_registry_opsgenie_provider_requires_api_key(self) -> None:
+        with patch.dict(os.environ, {}, clear=True):
+            registry = build_observability_registry(
+                alerts_provider="opsgenie",
+                metrics_provider="mock",
+                logs_provider="none",
+                traces_provider="none",
+                secrets=EnvSecretsLoader(),
+                resilience_policy=ResiliencePolicy(retries=0),
+            )
+            with self.assertRaises(ResilienceError) as ctx:
+                registry.fetch_active_alerts(["payments-api"], since_minutes=30, max_alerts=5)
+
+        self.assertEqual(ctx.exception.kind, "adapter_call_failed")
+        self.assertIsNotNone(ctx.exception.cause)
+        self.assertIn("OPSGENIE_API_KEY", str(ctx.exception.cause))
 
     def test_resilience_runner_opens_circuit_after_threshold(self) -> None:
         runner = ResilienceRunner(
