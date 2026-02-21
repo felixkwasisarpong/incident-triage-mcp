@@ -224,6 +224,47 @@ def _tool_request_meta(tool_event: str) -> tuple[dict[str, Any], str | None]:
     return meta, request_id
 
 
+def _http_health_payload() -> dict[str, Any]:
+    airflow_reason = _airflow_disabled_reason()
+    health = telemetry.health()
+    health["transport"] = _active_transport()
+    health["evidence_backend"] = _evidence_backend()
+    health["providers"] = observability.provider_summary()
+    health["airflow"] = {
+        "enabled": airflow_reason == "",
+        "reason": airflow_reason or None,
+    }
+    return health
+
+
+def _http_metrics_payload() -> dict[str, Any]:
+    snapshot = telemetry.snapshot()
+    snapshot["transport"] = _active_transport()
+    snapshot["evidence_backend"] = _evidence_backend()
+    snapshot["providers"] = observability.provider_summary()
+    return snapshot
+
+
+def _register_http_health_routes() -> None:
+    custom_route = getattr(mcp, "custom_route", None)
+    if not callable(custom_route):
+        return
+    try:
+        from starlette.responses import JSONResponse
+    except Exception:
+        return
+
+    @custom_route("/healthz", methods=["GET"], include_in_schema=False)
+    async def _healthz(_request):  # pragma: no cover - exercised in HTTP runtime
+        payload = _http_health_payload()
+        status_code = 200 if payload.get("ok") else 503
+        return JSONResponse(payload, status_code=status_code)
+
+    @custom_route("/metrics", methods=["GET"], include_in_schema=False)
+    async def _metrics(_request):  # pragma: no cover - exercised in HTTP runtime
+        return JSONResponse(_http_metrics_payload())
+
+
 def _build_idempotency_store() -> IdempotencyStore:
     try:
         return build_idempotency_store_from_env()
@@ -583,16 +624,8 @@ def ping(message: str = "hello") -> dict:
 def mcp_health() -> dict:
     meta, request_id = _tool_request_meta("mcp.health")
     corr = audit.write("mcp.health", {}, ok=True, meta=meta, correlation_id=request_id)
-    airflow_reason = _airflow_disabled_reason()
-    health = telemetry.health()
+    health = _http_health_payload()
     health["correlation_id"] = corr
-    health["transport"] = _active_transport()
-    health["evidence_backend"] = _evidence_backend()
-    health["providers"] = observability.provider_summary()
-    health["airflow"] = {
-        "enabled": airflow_reason == "",
-        "reason": airflow_reason or None,
-    }
     return health
 
 
@@ -601,11 +634,8 @@ def mcp_health() -> dict:
 def mcp_metrics() -> dict:
     meta, request_id = _tool_request_meta("mcp.metrics")
     corr = audit.write("mcp.metrics", {}, ok=True, meta=meta, correlation_id=request_id)
-    snapshot = telemetry.snapshot()
+    snapshot = _http_metrics_payload()
     snapshot["correlation_id"] = corr
-    snapshot["transport"] = _active_transport()
-    snapshot["evidence_backend"] = _evidence_backend()
-    snapshot["providers"] = observability.provider_summary()
     return snapshot
 
 
@@ -1189,6 +1219,9 @@ if _evidence_backend() == "airflow":
     # Airflow tools are discoverable only when explicitly requested.
     mcp.tool()(airflow_trigger_incident_dag)
     mcp.tool()(airflow_get_incident_artifact)
+
+
+_register_http_health_routes()
 
 
 def main() -> None:

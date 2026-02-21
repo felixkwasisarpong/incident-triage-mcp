@@ -159,6 +159,25 @@ class TestServerTools(unittest.TestCase):
         self.assertIn("ping", out["tools"])
         self.assertGreaterEqual(out["tools"]["ping"]["calls_total"], 1)
 
+    def test_http_health_payload_shape(self) -> None:
+        out = self.server._http_health_payload()
+        self.assertTrue(out["ok"])
+        self.assertIn("service", out)
+        self.assertIn("providers", out)
+        self.assertIn("transport", out)
+        self.assertIn("evidence_backend", out)
+        self.assertIn("airflow", out)
+
+    def test_http_metrics_payload_shape(self) -> None:
+        self.server.ping("metric-probe")
+        out = self.server._http_metrics_payload()
+        self.assertIn("service", out)
+        self.assertIn("totals", out)
+        self.assertIn("tools", out)
+        self.assertIn("providers", out)
+        self.assertIn("transport", out)
+        self.assertIn("evidence_backend", out)
+
     def test_http_auth_api_key_denies_missing_header(self) -> None:
         with patch.dict(
             os.environ,

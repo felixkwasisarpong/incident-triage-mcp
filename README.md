@@ -32,6 +32,7 @@ It exposes structured, auditable triage tools (evidence collection, runbook sear
 - **Artifact store:** filesystem (dev) or S3-compatible (MinIO/S3) for Docker/Kubernetes
 - **Audit-first:** JSONL audit events (stdout by default for k8s)
 - **Built-in service telemetry:** request/adaptor counters + latency via `mcp_health` and `mcp_metrics`
+- **HTTP health endpoints:** `/healthz` and `/metrics` for streamable-http deployments
 - **Guardrails:** RBAC + safe-action allowlists (WIP / expanding)
 - **Pluggable integrations:** mock-first, real adapters added progressively (env-based provider selection)
 - **Safe ticketing:** draft Jira tickets + gated create (dry-run by default, RBAC + confirm token)
@@ -591,6 +592,7 @@ Typical demo sequence:
 0) Check MCP service health/metrics:
    - `mcp_health()`
    - `mcp_metrics()`
+   - HTTP checks (streamable-http): `GET /healthz`, `GET /metrics`
 1) Trigger evidence collection:
    - `airflow_trigger_incident_dag(incident_id="INC-123", service="payments-api")`
 2) Wait for the Evidence Bundle:
