@@ -1,0 +1,45 @@
+replicaCount: 1
+
+image:
+  repository: ghcr.io/felixkwasisarpong/incident-triage-mcp
+  pullPolicy: IfNotPresent
+  tag: ""
+
+nameOverride: ""
+fullnameOverride: ""
+
+containerPort: 3333
+
+service:
+  type: ClusterIP
+  port: 80
+  targetPort: 3333
+
+podAnnotations: {}
+podLabels: {}
+
+resources: {}
+
+nodeSelector: {}
+
+tolerations: []
+
+affinity: {}
+
+env:
+  MCP_TRANSPORT: streamable-http
+  DEPLOYMENT_PROFILE: local
+  MCP_HOST: 0.0.0.0
+  MCP_PORT: "3333"
+  AUDIT_MODE: stdout
+
+# Plaintext secrets for quickstart only.
+# Use external secret management in production.
+secretEnv: {}
+
+# Raw env entries merged into container env list.
+# Example:
+# extraEnv:
+#   - name: EVIDENCE_BACKEND
+#     value: fs
+extraEnv: []
