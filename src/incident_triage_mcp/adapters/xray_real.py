@@ -25,14 +25,6 @@ class XRayAPI:
         if self._xray_client is not None:
             return self._xray_client
 
-        try:
-            import boto3  # type: ignore
-        except ModuleNotFoundError as exc:
-            raise RuntimeError(
-                "X-Ray provider requires optional dependency 'boto3'. "
-                "Install with: pip install 'incident-triage-mcp[aws]'"
-            ) from exc
-
         access_key = self._secrets.get("AWS_ACCESS_KEY_ID")
         secret_key = self._secrets.get("AWS_SECRET_ACCESS_KEY")
         session_token = self._secrets.get("AWS_SESSION_TOKEN")
@@ -42,6 +34,14 @@ class XRayAPI:
                 "X-Ray provider misconfigured: set both AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY, "
                 "or rely on IAM role/default credential chain."
             )
+
+        try:
+            import boto3  # type: ignore
+        except ModuleNotFoundError as exc:
+            raise RuntimeError(
+                "X-Ray provider requires optional dependency 'boto3'. "
+                "Install with: pip install 'incident-triage-mcp[aws]'"
+            ) from exc
 
         session_kwargs: dict[str, Any] = {"region_name": self._region()}
         if access_key and secret_key:
