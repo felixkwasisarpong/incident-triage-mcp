@@ -1,6 +1,7 @@
 from __future__ import annotations
 from typing import Protocol, Dict, Any
 from incident_triage_mcp.adapters.jira_cloud import JiraCloudProvider
+from incident_triage_mcp.adapters.servicenow import ServiceNowProvider
 import os
 
 class JiraProvider(Protocol):
@@ -20,4 +21,6 @@ def get_provider() -> JiraProvider:
         return JiraMockProvider()
     if name == "cloud":
         return JiraCloudProvider()
-    raise RuntimeError(f"Unsupported JIRA_PROVIDER='{name}'. Use 'mock' or 'cloud'.")
+    if name == "servicenow":
+        return ServiceNowProvider()
+    raise RuntimeError(f"Unsupported JIRA_PROVIDER='{name}'. Use 'mock', 'cloud', or 'servicenow'.")

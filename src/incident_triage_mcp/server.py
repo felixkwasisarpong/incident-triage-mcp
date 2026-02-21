@@ -1197,11 +1197,11 @@ def jira_validate_credentials() -> dict:
         correlation_id=request_id,
     )
 
-    if provider_name() != "cloud":
+    if provider_name() not in {"cloud", "servicenow"}:
         return {
             "correlation_id": corr,
             "ok": False,
-            "error": "Set JIRA_PROVIDER=cloud to validate Jira Cloud credentials.",
+            "error": "Set JIRA_PROVIDER=cloud or JIRA_PROVIDER=servicenow to validate ticket provider credentials.",
         }
 
     try:
