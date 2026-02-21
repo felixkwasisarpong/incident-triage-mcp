@@ -169,7 +169,20 @@ SLACK_WEBHOOK_URL=https://hooks.slack.com/services/...
 SLACK_DEFAULT_CHANNEL=#incident-triage
 
 # Idempotency storage for ticket create retries
+# file (default) keeps local/dev behavior; redis/postgres are durable backends for prod.
+IDEMPOTENCY_BACKEND=file|redis|postgres|none
+
+# File backend (IDEMPOTENCY_BACKEND=file)
 IDEMPOTENCY_STORE_PATH=./data/jira_idempotency.json
+
+# Redis backend (IDEMPOTENCY_BACKEND=redis)
+IDEMPOTENCY_REDIS_URL=redis://localhost:6379/0
+IDEMPOTENCY_REDIS_KEY_PREFIX=incident-triage:idempotency:
+IDEMPOTENCY_REDIS_TTL_SECONDS=604800
+
+# Postgres backend (IDEMPOTENCY_BACKEND=postgres)
+IDEMPOTENCY_POSTGRES_DSN=postgresql://user:pass@localhost:5432/incident_triage
+IDEMPOTENCY_POSTGRES_TABLE=jira_idempotency
 
 # Adapter provider selection (prod scaffold; defaults are mock)
 ALERTS_PROVIDER=mock|datadog|cloudwatch|prometheus|pagerduty

@@ -9,7 +9,10 @@ from typing import Any
 import requests
 from mcp.server.fastmcp import FastMCP
 
-from incident_triage_mcp.adapters.idempotency_store import FileIdempotencyStore
+from incident_triage_mcp.adapters.idempotency_store import (
+    IdempotencyStore,
+    build_idempotency_store_from_env,
+)
 from incident_triage_mcp.adapters.jira_provider import get_provider, provider_name
 from incident_triage_mcp.adapters.registry import build_observability_registry
 from incident_triage_mcp.adapters.resilience import ResilienceError, ResiliencePolicy
@@ -71,12 +74,11 @@ datadog = observability.alerts_adapter
 runbooks = RunbooksLocal()
 
 
-def _build_idempotency_store():
-    path = os.getenv("IDEMPOTENCY_STORE_PATH", "./data/jira_idempotency.json")
+def _build_idempotency_store() -> IdempotencyStore:
     try:
-        return FileIdempotencyStore(path)
-    except OSError:
-        # Keep server bootable in read-only CWDs; idempotency replay is disabled.
+        return build_idempotency_store_from_env()
+    except Exception:
+        # Keep server bootable if backend is unavailable/misconfigured.
         return _NoopIdempotencyStore()
 
 
