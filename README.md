@@ -284,6 +284,12 @@ set -a; source .env.staging; set +a
 incident-triage-mcp
 ```
 
+Smoke-check all three profile templates locally:
+
+```bash
+./scripts/smoke_profiles.sh
+```
+
 Profile guardrails enforced by config:
 
 | Profile | Guardrails |
@@ -492,6 +498,12 @@ UV_CACHE_DIR=.uv-cache /opt/anaconda3/bin/uv run --project . \
 ```
 
 The suite currently covers all MCP tools defined in `src/incident_triage_mcp/server.py`.
+
+Deployment profile smoke checks:
+
+```bash
+./scripts/smoke_profiles.sh
+```
 
 ---
 
