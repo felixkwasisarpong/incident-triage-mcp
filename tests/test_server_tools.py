@@ -349,6 +349,54 @@ class TestServerTools(unittest.TestCase):
 
         post_mock.assert_not_called()
 
+    def test_notify_post_update_defaults_to_slack(self) -> None:
+        with patch.object(
+            self.server,
+            "slack_post_update",
+            return_value={"posted": False, "dry_run": True, "payload": {"text": "preview"}},
+        ) as slack_mock:
+            out = self.server.notify_post_update(
+                incident_id="INC-205",
+                service="payments-api",
+                summary={"status": "triage_started"},
+                channel="#incident-triage",
+            )
+
+        slack_mock.assert_called_once_with(
+            incident_id="INC-205",
+            service="payments-api",
+            summary={"status": "triage_started"},
+            ticket=None,
+            channel="#incident-triage",
+            dry_run=True,
+        )
+        self.assertEqual(out["provider"], "slack")
+        self.assertFalse(out["posted"])
+
+    def test_notify_post_update_routes_to_teams(self) -> None:
+        with patch.object(
+            self.server,
+            "teams_post_update",
+            return_value={"posted": False, "dry_run": True, "payload": {"title": "preview"}},
+        ) as teams_mock:
+            out = self.server.notify_post_update(
+                incident_id="INC-206",
+                service="payments-api",
+                provider="teams",
+                channel="Incident Triage",
+            )
+
+        teams_mock.assert_called_once_with(
+            incident_id="INC-206",
+            service="payments-api",
+            summary=None,
+            ticket=None,
+            channel="Incident Triage",
+            dry_run=True,
+        )
+        self.assertEqual(out["provider"], "teams")
+        self.assertFalse(out["posted"])
+
     def test_incident_triage_run(self) -> None:
         with patch.object(self.server, "triage_incident_run", return_value={"status": "ok"}) as run_mock:
             out = self.server.incident_triage_run("INC-1", "payments-api")
@@ -435,6 +483,8 @@ class TestServerTools(unittest.TestCase):
 
         self.assertEqual(out["correlation_id"], "corr-1")
         self.assertIn("slack", out)
+        self.assertIn("notify", out)
+        self.assertEqual(out["notify"]["provider"], "slack")
         slack_mock.assert_called_once_with(
             incident_id="INC-4",
             service="payments-api",
@@ -456,6 +506,7 @@ class TestServerTools(unittest.TestCase):
         self.assertFalse(out["slack"]["posted"])
         self.assertFalse(out["slack"]["dry_run"])
         self.assertIn("timeout", out["slack"]["error"])
+        self.assertEqual(out["notify"]["provider"], "slack")
 
     def test_incident_triage_run_with_teams_notify(self) -> None:
         with patch.object(
@@ -478,6 +529,8 @@ class TestServerTools(unittest.TestCase):
 
         self.assertEqual(out["correlation_id"], "corr-1")
         self.assertIn("teams", out)
+        self.assertIn("notify", out)
+        self.assertEqual(out["notify"]["provider"], "teams")
         teams_mock.assert_called_once_with(
             incident_id="INC-6",
             service="payments-api",
@@ -505,6 +558,7 @@ class TestServerTools(unittest.TestCase):
         self.assertFalse(out["teams"]["posted"])
         self.assertFalse(out["teams"]["dry_run"])
         self.assertIn("timeout", out["teams"]["error"])
+        self.assertEqual(out["notify"]["provider"], "teams")
 
     def test_alerts_fetch_active(self) -> None:
         alerts = [

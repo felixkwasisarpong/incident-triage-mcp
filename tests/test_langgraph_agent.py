@@ -53,6 +53,7 @@ class TestLangGraphAgent(unittest.TestCase):
                 include_ticket=True,
                 project_key="SCRUM",
                 notify_slack=True,
+                notify_provider="teams",
                 slack_channel="#incident-triage",
                 slack_dry_run=False,
                 create_ticket_live=False,
@@ -67,6 +68,7 @@ class TestLangGraphAgent(unittest.TestCase):
         self.assertEqual(len(fake_server.calls), 1)
         self.assertEqual(fake_server.calls[0]["incident_id"], "INC-123")
         self.assertEqual(fake_server.calls[0]["service"], "payments-api")
+        self.assertEqual(fake_server.calls[0]["notify_provider"], "teams")
         self.assertEqual(fake_server.ticket_calls, [])
 
     def test_run_agent_with_live_ticket(self) -> None:
@@ -146,6 +148,7 @@ class TestLangGraphAgent(unittest.TestCase):
             include_ticket=False,
             project_key=None,
             notify_slack=True,
+            notify_provider=None,
             slack_channel="#incident-triage",
             slack_dry_run=False,
             create_ticket_live=False,
@@ -226,6 +229,7 @@ class TestLangGraphAgent(unittest.TestCase):
             include_ticket=False,
             project_key=None,
             notify_slack=False,
+            notify_provider=None,
             slack_channel=None,
             slack_dry_run=True,
             create_ticket_live=True,
@@ -247,6 +251,27 @@ class TestLangGraphAgent(unittest.TestCase):
             self.assertEqual(os.environ["AIRFLOW_ARTIFACT_DIR"], "./airflow/artifacts")
 
         self.assertEqual(code, 0)
+
+    def test_main_passes_notify_provider(self) -> None:
+        from incident_triage_mcp.agents import langgraph_agent as agent
+
+        with patch.dict(os.environ, {}, clear=True), patch.object(
+            agent, "run_agent", return_value={"result": {"status": "ok"}}
+        ) as run_mock, patch("builtins.print"):
+            code = agent.main(
+                [
+                    "--incident-id",
+                    "INC-68",
+                    "--service",
+                    "payments-api",
+                    "--notify-slack",
+                    "--notify-provider",
+                    "teams",
+                ]
+            )
+
+        self.assertEqual(code, 0)
+        self.assertEqual(run_mock.call_args.kwargs["notify_provider"], "teams")
 
     def test_main_allows_s3_artifact_store(self) -> None:
         from incident_triage_mcp.agents import langgraph_agent as agent
@@ -274,4 +299,3 @@ class TestLangGraphAgent(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-

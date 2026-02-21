@@ -512,30 +512,25 @@ def incident_triage_run(
     if notify_slack:
         target = resolved_notify_provider
         try:
-            if target == "teams":
-                result["teams"] = teams_post_update(
-                    incident_id=incident_id,
-                    service=service,
-                    summary=result.get("summary"),
-                    ticket=result.get("ticket"),
-                    channel=slack_channel,
-                    dry_run=slack_dry_run,
-                )
-            else:
-                result["slack"] = slack_post_update(
-                    incident_id=incident_id,
-                    service=service,
-                    summary=result.get("summary"),
-                    ticket=result.get("ticket"),
-                    channel=slack_channel,
-                    dry_run=slack_dry_run,
-                )
+            notify_result = notify_post_update(
+                incident_id=incident_id,
+                service=service,
+                summary=result.get("summary"),
+                ticket=result.get("ticket"),
+                provider=target,
+                channel=slack_channel,
+                dry_run=slack_dry_run,
+            )
         except Exception as e:
-            result[target] = {
+            notify_result = {
                 "posted": False,
                 "dry_run": slack_dry_run,
                 "error": str(e),
+                "provider": target,
             }
+        result["notify"] = notify_result
+        notify_key = "teams" if str(notify_result.get("provider") or target).lower() == "teams" else "slack"
+        result[notify_key] = notify_result
 
     result["correlation_id"] = corr
     return result
@@ -667,6 +662,44 @@ def mcp_metrics() -> dict:
     snapshot = _http_metrics_payload()
     snapshot["correlation_id"] = corr
     return snapshot
+
+
+@mcp.tool()
+@_instrumented_tool("notify_post_update")
+def notify_post_update(
+    incident_id: str,
+    service: str | None = None,
+    summary: dict | None = None,
+    ticket: dict | None = None,
+    provider: str | None = None,
+    channel: str | None = None,
+    dry_run: bool = True,
+    text: str | None = None,
+) -> dict:
+    """
+    Provider-agnostic notification entrypoint.
+    Routes to Slack or Teams based on provider/env defaults.
+    """
+    resolved_provider = _notify_provider(provider)
+    call_kwargs: dict[str, Any] = {
+        "incident_id": incident_id,
+        "service": service,
+        "summary": summary,
+        "ticket": ticket,
+        "channel": channel,
+        "dry_run": dry_run,
+    }
+    if text is not None:
+        call_kwargs["text"] = text
+
+    if resolved_provider == "teams":
+        out = teams_post_update(**call_kwargs)
+    else:
+        out = slack_post_update(**call_kwargs)
+
+    result = dict(out)
+    result["provider"] = resolved_provider
+    return result
 
 
 @mcp.tool()
