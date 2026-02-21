@@ -1,0 +1,7 @@
+apiVersion: v2
+name: incident-triage-mcp
+description: Helm chart for deploying the Incident Triage MCP server
+type: application
+version: 0.1.0
+appVersion: "0.2.5"
+kubeVersion: ">=1.25.0-0"

@@ -564,7 +564,7 @@ Release workflow:
 - Trigger: push a Git tag like `v0.2.0`
 - Publishes:
   - Python package to PyPI
-  - Docker image to `ghcr.io/<owner>/incident-triage-mcp`
+  - Multi-arch Docker image (`linux/amd64`, `linux/arm64`) to `ghcr.io/<owner>/incident-triage-mcp`
   - GitHub Release with generated notes
 
 Required repository secret:
@@ -739,6 +739,26 @@ Now the MCP service is reachable at `http://localhost:3333`.
 
 > If MinIO is running in Docker on your Mac and MCP is running in kind, set `S3_ENDPOINT_URL` to `http://host.docker.internal:9000` in the Kubernetes Deployment.
 
+### Helm chart quickstart
+
+Install from the local chart scaffold:
+
+```bash
+helm upgrade --install incident-triage-mcp ./charts/incident-triage-mcp \
+  --namespace incident-triage --create-namespace \
+  --set image.repository=ghcr.io/felixkwasisarpong/incident-triage-mcp \
+  --set image.tag=0.2.5 \
+  --set env.DEPLOYMENT_PROFILE=staging \
+  --set env.MCP_TRANSPORT=streamable-http \
+  --set secretEnv.MCP_HTTP_API_KEY=change-me
+```
+
+Useful overrides:
+
+- `values.yaml` `env` map for non-secret runtime settings.
+- `values.yaml` `secretEnv` map for quickstart secrets (use external secrets in production).
+- `values.yaml` `extraEnv` list for advanced `valueFrom` entries.
+
 ---
 
 ## Roadmap (next)
@@ -747,7 +767,7 @@ Now the MCP service is reachable at `http://localhost:3333`.
 - ✅ Artifact store for Docker/K8s via MinIO/S3 (filesystem remains for fast local dev)
 - ✅ Deployment profiles (`local`/`staging`/`prod`) with guardrails and env templates
 - ✅ Built-in MCP observability tools (`mcp_health`, `mcp_metrics`)
-- Add a Helm chart + GitHub Actions to build/push multi-arch Docker images
+- ✅ Add a Helm chart + GitHub Actions to build/push multi-arch Docker images
 - Expand **RBAC + safe actions** with preconditions and approval tokens
 - Add richer **tracing** for MCP internals (OpenTelemetry/OTLP export)
 

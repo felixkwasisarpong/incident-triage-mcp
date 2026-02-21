@@ -1,0 +1,8 @@
+# Files and directories to ignore when packaging Helm charts.
+.git/
+.github/
+.vscode/
+.idea/
+*.swp
+*.tmp
+.DS_Store
