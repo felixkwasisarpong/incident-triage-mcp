@@ -1171,7 +1171,7 @@ def jira_create_ticket(
     """
     Safe action:
     - dry_run=True by default (no mutation)
-    - dry_run=False requires reason + confirm_token + RBAC allow
+    - dry_run=False requires reason + confirm_token + idempotency_key + RBAC allow
     """
     meta, request_id = _tool_request_meta("jira.create_ticket")
     tool_name = "jira.create_ticket"
