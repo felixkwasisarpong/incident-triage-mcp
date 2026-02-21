@@ -15,6 +15,7 @@ class IncidentGraphState(TypedDict, total=False):
     include_ticket: bool
     project_key: str | None
     notify_slack: bool
+    notify_provider: str | None
     slack_channel: str | None
     slack_dry_run: bool
     create_ticket_live: bool
@@ -40,6 +41,7 @@ def _run_triage_node(state: IncidentGraphState) -> IncidentGraphState:
             include_ticket=state.get("include_ticket", False),
             project_key=state.get("project_key"),
             notify_slack=state.get("notify_slack", False),
+            notify_provider=state.get("notify_provider"),
             slack_channel=state.get("slack_channel"),
             slack_dry_run=state.get("slack_dry_run", True),
         )
@@ -124,6 +126,7 @@ def run_agent(
     include_ticket: bool = False,
     project_key: str | None = None,
     notify_slack: bool = False,
+    notify_provider: str | None = None,
     slack_channel: str | None = None,
     slack_dry_run: bool = True,
     create_ticket_live: bool = False,
@@ -138,6 +141,7 @@ def run_agent(
         "include_ticket": include_ticket,
         "project_key": project_key,
         "notify_slack": notify_slack,
+        "notify_provider": notify_provider,
         "slack_channel": slack_channel,
         "slack_dry_run": slack_dry_run,
         "create_ticket_live": create_ticket_live,
@@ -185,6 +189,11 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Optional idempotency key for live ticket creation.",
     )
     parser.add_argument("--notify-slack", action="store_true", help="Send Slack update via webhook tool")
+    parser.add_argument(
+        "--notify-provider",
+        choices=("slack", "teams"),
+        help="Notification provider for --notify-slack (default comes from NOTIFY_PROVIDER).",
+    )
     parser.add_argument("--slack-channel", help="Slack channel override (e.g. #incident-triage)")
     parser.add_argument(
         "--slack-live",
@@ -218,6 +227,7 @@ def main(argv: list[str] | None = None) -> int:
         include_ticket=args.include_ticket,
         project_key=args.project_key,
         notify_slack=args.notify_slack,
+        notify_provider=args.notify_provider,
         slack_channel=args.slack_channel,
         slack_dry_run=not args.slack_live,
         create_ticket_live=args.create_ticket_live,

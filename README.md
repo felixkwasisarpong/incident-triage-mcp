@@ -655,6 +655,8 @@ Typical demo sequence:
    - `incident_triage_run(incident_id="INC-123", service="payments-api", include_ticket=true)`
    - Override project key for the ticket hook: `incident_triage_run(incident_id="INC-123", service="payments-api", include_ticket=true, project_key="PAY")`
 5) Optional notification hook (safe dry-run by default):
+   - Provider-agnostic notify tool: `notify_post_update(incident_id="INC-123", service="payments-api", provider="slack")`
+   - Teams via generic tool: `notify_post_update(incident_id="INC-123", service="payments-api", provider="teams", channel="Incident Triage", dry_run=false)`
    - `incident_triage_run(incident_id="INC-123", service="payments-api", notify_slack=true)`
    - Slack live send: `incident_triage_run(incident_id="INC-123", service="payments-api", notify_slack=true, notify_provider="slack", slack_channel="#incident-triage", slack_dry_run=false)`
    - Teams live send: `incident_triage_run(incident_id="INC-123", service="payments-api", notify_slack=true, notify_provider="teams", slack_channel="Incident Triage", slack_dry_run=false)`

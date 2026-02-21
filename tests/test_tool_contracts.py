@@ -26,6 +26,7 @@ CORE_TOOLS = {
     "ping",
     "mcp_health",
     "mcp_metrics",
+    "notify_post_update",
     "slack_post_update",
     "teams_post_update",
     "evidence_get_bundle",
