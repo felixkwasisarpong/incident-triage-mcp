@@ -22,6 +22,9 @@ def _require(name: str) -> str:
 
 @dataclass(frozen=True)
 class AppConfig:
+    # Deployment profile
+    deployment_profile: str
+
     # MCP
     mcp_transport: str
     mcp_host: str
@@ -77,6 +80,7 @@ def load_config() -> AppConfig:
     evidence_backend = (_env("EVIDENCE_BACKEND") or artifact_store or "fs").lower()
 
     cfg = AppConfig(
+        deployment_profile=(_env("DEPLOYMENT_PROFILE", "local") or "local").lower(),
         mcp_transport=_env("MCP_TRANSPORT", "stdio") or "stdio",
         mcp_host=_env("MCP_HOST", "0.0.0.0") or "0.0.0.0",
         mcp_port=int(_env("MCP_PORT", "3333") or "3333"),
@@ -123,6 +127,10 @@ def load_config() -> AppConfig:
         runbooks_dir=_env("RUNBOOKS_DIR", "./runbooks") or "./runbooks",
     )
 
+    # Validate deployment profile
+    if cfg.deployment_profile not in {"local", "staging", "prod"}:
+        raise ConfigError("DEPLOYMENT_PROFILE must be one of: local, staging, prod")
+
     # Validate audit
     if cfg.audit_mode not in {"stdout", "file"}:
         raise ConfigError("AUDIT_MODE must be 'stdout' or 'file'")
@@ -158,6 +166,50 @@ def load_config() -> AppConfig:
         raise ConfigError("MCP_HTTP_JWT_SECRET is required when MCP_HTTP_AUTH_MODE=jwt_hs256")
     if cfg.http_jwt_leeway_seconds < 0:
         raise ConfigError("MCP_HTTP_JWT_LEEWAY_SECONDS must be >= 0")
+
+    # Profile-aware security requirements
+    if cfg.deployment_profile in {"staging", "prod"}:
+        if cfg.mcp_transport == "streamable-http" and cfg.http_auth_mode == "none":
+            raise ConfigError(
+                "MCP_HTTP_AUTH_MODE cannot be 'none' in staging/prod when MCP_TRANSPORT=streamable-http"
+            )
+
+        selected_providers = {
+            cfg.alerts_provider,
+            cfg.metrics_provider,
+            cfg.logs_provider,
+            cfg.traces_provider,
+        }
+        provider_requirements: dict[str, list[str]] = {
+            "datadog": ["DATADOG_API_KEY", "DATADOG_APP_KEY"],
+            "prometheus": ["PROMETHEUS_BASE_URL"],
+            "pagerduty": ["PAGERDUTY_API_TOKEN"],
+            "elk": ["ELASTICSEARCH_BASE_URL"],
+        }
+        for provider, env_vars in provider_requirements.items():
+            if provider not in selected_providers:
+                continue
+            missing = [name for name in env_vars if not _env(name)]
+            if missing:
+                raise ConfigError(
+                    f"Missing required env vars for {provider} provider in {cfg.deployment_profile} profile: "
+                    + ", ".join(missing)
+                )
+
+    if cfg.deployment_profile == "prod":
+        if cfg.audit_mode != "stdout":
+            raise ConfigError("AUDIT_MODE must be 'stdout' in DEPLOYMENT_PROFILE=prod")
+        if cfg.alerts_provider == "mock" or cfg.metrics_provider == "mock":
+            raise ConfigError(
+                "ALERTS_PROVIDER and METRICS_PROVIDER cannot be 'mock' in DEPLOYMENT_PROFILE=prod"
+            )
+        if cfg.evidence_backend == "none":
+            raise ConfigError("EVIDENCE_BACKEND cannot be 'none' in DEPLOYMENT_PROFILE=prod")
+        idempotency_backend = (_env("IDEMPOTENCY_BACKEND", "file") or "file").strip().lower()
+        if idempotency_backend not in {"redis", "postgres", "postgresql"}:
+            raise ConfigError(
+                "IDEMPOTENCY_BACKEND must be redis or postgres in DEPLOYMENT_PROFILE=prod"
+            )
 
     # Validate resilience settings
     if cfg.adapter_timeout_seconds <= 0:

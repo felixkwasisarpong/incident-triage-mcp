@@ -52,6 +52,11 @@ incident-triage-mcp/
   pyproject.toml
   README.md
   docker-compose.yml
+  deploy/
+    profiles/
+      local.env.example
+      staging.env.example
+      prod.env.example
   airflow/
     dags/
     artifacts/
@@ -125,6 +130,7 @@ docker run --rm incident-triage-mcp:latest incident-triage-agent --incident-id I
 
 ```bash
 # MCP
+DEPLOYMENT_PROFILE=local|staging|prod
 MCP_TRANSPORT=stdio|streamable-http
 MCP_HOST=0.0.0.0
 MCP_PORT=3333
@@ -254,6 +260,48 @@ AWS_SECRET_ACCESS_KEY=<optional-static-secret>
 # Secrets loader
 SECRET_PROVIDER=env|secret-manager
 ```
+
+---
+
+## Deployment profiles (`local`, `staging`, `prod`)
+
+Use profile templates from `deploy/profiles/`:
+
+```bash
+cp deploy/profiles/local.env.example .env.local
+cp deploy/profiles/staging.env.example .env.staging
+cp deploy/profiles/prod.env.example .env.prod
+```
+
+Run with a profile env file:
+
+```bash
+# Docker Compose
+docker compose --env-file .env.local up --build
+
+# Direct
+set -a; source .env.staging; set +a
+incident-triage-mcp
+```
+
+Profile guardrails enforced by config:
+
+| Profile | Guardrails |
+|---|---|
+| `local` | Mock providers and file idempotency are allowed for fast dev loops. |
+| `staging` | If `MCP_TRANSPORT=streamable-http`, auth cannot be `none`; provider-specific env vars are validated. |
+| `prod` | `AUDIT_MODE=stdout`; alerts/metrics providers cannot be `mock`; evidence backend cannot be `none`; idempotency backend must be `redis` or `postgres`. |
+
+Adapter env matrix (validated when selected in `staging`/`prod`):
+
+| Provider | Required env vars |
+|---|---|
+| `datadog` | `DATADOG_API_KEY`, `DATADOG_APP_KEY` |
+| `prometheus` | `PROMETHEUS_BASE_URL` |
+| `pagerduty` | `PAGERDUTY_API_TOKEN` |
+| `elk` | `ELASTICSEARCH_BASE_URL` |
+| `cloudwatch` | Uses AWS auth chain (or `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY`) |
+| `xray` | Uses AWS auth chain (or `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY`) |
 
 ---
 

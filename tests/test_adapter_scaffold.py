@@ -16,10 +16,16 @@ class TestAdapterScaffold(unittest.TestCase):
         with patch.dict(os.environ, {}, clear=True):
             cfg = load_config()
 
+        self.assertEqual(cfg.deployment_profile, "local")
         self.assertEqual(cfg.alerts_provider, "mock")
         self.assertEqual(cfg.metrics_provider, "mock")
         self.assertEqual(cfg.logs_provider, "mock")
         self.assertEqual(cfg.traces_provider, "mock")
+
+    def test_config_rejects_invalid_deployment_profile(self) -> None:
+        with patch.dict(os.environ, {"DEPLOYMENT_PROFILE": "qa"}, clear=True):
+            with self.assertRaises(ConfigError):
+                load_config()
 
     def test_config_rejects_invalid_provider_flag(self) -> None:
         with patch.dict(os.environ, {"ALERTS_PROVIDER": "nope"}, clear=True):
@@ -40,6 +46,82 @@ class TestAdapterScaffold(unittest.TestCase):
         with patch.dict(os.environ, {"MCP_HTTP_AUTH_MODE": "jwt_hs256"}, clear=True):
             with self.assertRaises(ConfigError):
                 load_config()
+
+    def test_staging_streamable_http_requires_auth(self) -> None:
+        with patch.dict(
+            os.environ,
+            {
+                "DEPLOYMENT_PROFILE": "staging",
+                "MCP_TRANSPORT": "streamable-http",
+                "MCP_HTTP_AUTH_MODE": "none",
+            },
+            clear=True,
+        ):
+            with self.assertRaises(ConfigError):
+                load_config()
+
+    def test_staging_requires_datadog_secrets_when_selected(self) -> None:
+        with patch.dict(
+            os.environ,
+            {
+                "DEPLOYMENT_PROFILE": "staging",
+                "MCP_TRANSPORT": "stdio",
+                "ALERTS_PROVIDER": "datadog",
+            },
+            clear=True,
+        ):
+            with self.assertRaises(ConfigError):
+                load_config()
+
+    def test_prod_requires_durable_idempotency_backend(self) -> None:
+        with patch.dict(
+            os.environ,
+            {
+                "DEPLOYMENT_PROFILE": "prod",
+                "MCP_TRANSPORT": "stdio",
+                "AUDIT_MODE": "stdout",
+                "ALERTS_PROVIDER": "cloudwatch",
+                "METRICS_PROVIDER": "cloudwatch",
+            },
+            clear=True,
+        ):
+            with self.assertRaises(ConfigError):
+                load_config()
+
+    def test_prod_rejects_mock_alerts_metrics(self) -> None:
+        with patch.dict(
+            os.environ,
+            {
+                "DEPLOYMENT_PROFILE": "prod",
+                "MCP_TRANSPORT": "stdio",
+                "AUDIT_MODE": "stdout",
+                "ALERTS_PROVIDER": "mock",
+                "METRICS_PROVIDER": "mock",
+                "IDEMPOTENCY_BACKEND": "redis",
+                "IDEMPOTENCY_REDIS_URL": "redis://localhost:6379/0",
+            },
+            clear=True,
+        ):
+            with self.assertRaises(ConfigError):
+                load_config()
+
+    def test_prod_minimal_valid_profile(self) -> None:
+        with patch.dict(
+            os.environ,
+            {
+                "DEPLOYMENT_PROFILE": "prod",
+                "MCP_TRANSPORT": "stdio",
+                "AUDIT_MODE": "stdout",
+                "ALERTS_PROVIDER": "cloudwatch",
+                "METRICS_PROVIDER": "cloudwatch",
+                "IDEMPOTENCY_BACKEND": "redis",
+                "IDEMPOTENCY_REDIS_URL": "redis://localhost:6379/0",
+            },
+            clear=True,
+        ):
+            cfg = load_config()
+
+        self.assertEqual(cfg.deployment_profile, "prod")
 
     def test_registry_mock_provider_works(self) -> None:
         registry = build_observability_registry(
