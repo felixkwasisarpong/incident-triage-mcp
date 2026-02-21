@@ -305,6 +305,91 @@ Adapter env matrix (validated when selected in `staging`/`prod`):
 
 ---
 
+## Prod Mode (deployment checklist)
+
+Use `DEPLOYMENT_PROFILE=prod` with `deploy/profiles/prod.env.example` as your baseline.
+
+1) Prepare production env file
+
+```bash
+cp deploy/profiles/prod.env.example .env.prod
+# fill real secrets/hosts (no placeholders)
+```
+
+2) Start with strict prod guardrails enabled
+
+```bash
+set -a; source .env.prod; set +a
+incident-triage-mcp
+```
+
+The process will fail fast if prod requirements are not met (for example mock alerts/metrics providers, missing durable idempotency backend, or missing HTTP auth config for streamable HTTP).
+
+3) Verify service telemetry and posture from your MCP client
+
+- `mcp_health()`
+- `mcp_metrics()`
+- `jira_create_ticket(incident_id="INC-123", dry_run=true)` (safe action smoke check)
+
+4) Rollout recommendation
+
+- Deploy to staging first with the same providers/secrets model.
+- Keep `dry_run=true` for mutating tools in initial production canaries.
+- Alert on `mcp_metrics().totals.adapter_errors_total` and `mcp_metrics().totals.auth_denied_total`.
+
+---
+
+## Adapter onboarding (<30 min)
+
+Use this path to add a new provider with minimal risk.
+
+1) Implement adapter class
+
+- Create `src/incident_triage_mcp/adapters/<provider>_real.py`.
+- Implement the contract methods you need (`fetch_active_alerts`, `health_snapshot`, optional `fetch_logs`, `fetch_traces`).
+
+2) Register provider
+
+- Wire it in `src/incident_triage_mcp/adapters/registry.py` inside `_register_builtin_providers()`.
+
+3) Add provider flag support
+
+- Add provider name to allowed sets in `src/incident_triage_mcp/config.py` (`ALERTS_PROVIDER`, `METRICS_PROVIDER`, etc.).
+- Add required env validation for `staging`/`prod` profile if the provider needs secrets/URLs.
+
+4) Add tests
+
+- Contract tests at registry level (`tests/test_adapter_scaffold.py` style).
+- Provider-specific unit tests with fake HTTP/AWS clients.
+- Tool-path tests in `tests/test_server_tools.py` for success + failure normalization.
+
+5) Document env vars + usage
+
+- Add env vars to `README.md` “Key environment variables”.
+- Add one demo call in “Demo flow (agent/host)” if relevant.
+
+Minimal skeleton:
+
+```python
+class NewProviderAPI:
+    def __init__(self, secrets):
+        self.api_key = secrets.get("NEW_PROVIDER_API_KEY", required=True)
+
+    def fetch_active_alerts(self, services, since_minutes, max_alerts):
+        ...
+
+    def health_snapshot(self, service, start_iso, end_iso):
+        ...
+```
+
+Definition of done:
+
+- Provider selectable via env only (no code changes for users).
+- Missing/invalid provider config fails clearly at startup in `staging`/`prod`.
+- Tests pass and `mcp_health()` / `mcp_metrics()` still report expected values.
+
+---
+
 ## Standalone Mode (No Airflow)
 
 Boot MCP standalone with only stdio + local runbooks:
@@ -588,9 +673,11 @@ Now the MCP service is reachable at `http://localhost:3333`.
 
 - ✅ Ticketing: Jira draft + gated create (mock provider); add Jira Cloud provider wiring + richer formatting
 - ✅ Artifact store for Docker/K8s via MinIO/S3 (filesystem remains for fast local dev)
+- ✅ Deployment profiles (`local`/`staging`/`prod`) with guardrails and env templates
+- ✅ Built-in MCP observability tools (`mcp_health`, `mcp_metrics`)
 - Add a Helm chart + GitHub Actions to build/push multi-arch Docker images
 - Expand **RBAC + safe actions** with preconditions and approval tokens
-- Add richer **observability** (metrics + structured tracing)
+- Add richer **tracing** for MCP internals (OpenTelemetry/OTLP export)
 
 ---
 
