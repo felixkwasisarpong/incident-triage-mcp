@@ -207,7 +207,7 @@ IDEMPOTENCY_POSTGRES_DSN=postgresql://user:pass@localhost:5432/incident_triage
 IDEMPOTENCY_POSTGRES_TABLE=jira_idempotency
 
 # Adapter provider selection (prod scaffold; defaults are mock)
-ALERTS_PROVIDER=mock|datadog|cloudwatch|prometheus|pagerduty
+ALERTS_PROVIDER=mock|datadog|cloudwatch|prometheus|pagerduty|opsgenie
 METRICS_PROVIDER=mock|datadog|cloudwatch|prometheus
 LOGS_PROVIDER=mock|datadog|cloudwatch|elk|none
 TRACES_PROVIDER=mock|datadog|cloudwatch|xray|otel|none
@@ -245,6 +245,11 @@ PROMETHEUS_RPS_QUERY=sum(rate(http_server_requests_total{service="{service}"}[5m
 PAGERDUTY_API_TOKEN=<pagerduty-rest-api-token>
 PAGERDUTY_BASE_URL=https://api.pagerduty.com
 PAGERDUTY_HTTP_TIMEOUT_SECONDS=10
+
+# Opsgenie settings (used when ALERTS_PROVIDER=opsgenie)
+OPSGENIE_API_KEY=<opsgenie-api-key>
+OPSGENIE_BASE_URL=https://api.opsgenie.com
+OPSGENIE_HTTP_TIMEOUT_SECONDS=10
 
 # ELK/OpenSearch settings (used when LOGS_PROVIDER=elk)
 ELASTICSEARCH_BASE_URL=http://localhost:9200
@@ -312,6 +317,7 @@ Adapter env matrix (validated when selected in `staging`/`prod`):
 | `datadog` | `DATADOG_API_KEY`, `DATADOG_APP_KEY` |
 | `prometheus` | `PROMETHEUS_BASE_URL` |
 | `pagerduty` | `PAGERDUTY_API_TOKEN` |
+| `opsgenie` | `OPSGENIE_API_KEY` |
 | `elk` | `ELASTICSEARCH_BASE_URL` |
 | `cloudwatch` | Uses AWS auth chain (or `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY`) |
 | `xray` | Uses AWS auth chain (or `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY`) |

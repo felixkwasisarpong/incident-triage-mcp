@@ -143,7 +143,7 @@ def load_config() -> AppConfig:
     provider_sets = {
         "ALERTS_PROVIDER": (
             cfg.alerts_provider,
-            {"mock", "datadog", "cloudwatch", "prometheus", "pagerduty"},
+            {"mock", "datadog", "cloudwatch", "prometheus", "pagerduty", "opsgenie"},
         ),
         "METRICS_PROVIDER": (cfg.metrics_provider, {"mock", "datadog", "cloudwatch", "prometheus"}),
         "LOGS_PROVIDER": (cfg.logs_provider, {"mock", "datadog", "cloudwatch", "elk", "none"}),
@@ -184,6 +184,7 @@ def load_config() -> AppConfig:
             "datadog": ["DATADOG_API_KEY", "DATADOG_APP_KEY"],
             "prometheus": ["PROMETHEUS_BASE_URL"],
             "pagerduty": ["PAGERDUTY_API_TOKEN"],
+            "opsgenie": ["OPSGENIE_API_KEY"],
             "elk": ["ELASTICSEARCH_BASE_URL"],
         }
         for provider, env_vars in provider_requirements.items():

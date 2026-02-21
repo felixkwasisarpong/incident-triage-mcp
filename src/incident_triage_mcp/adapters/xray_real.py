@@ -223,7 +223,7 @@ class XRayAPI:
     ) -> list[dict[str, Any]]:
         raise RuntimeError(
             "X-Ray adapter does not implement fetch_active_alerts. "
-            "Use ALERTS_PROVIDER=datadog|cloudwatch|prometheus|pagerduty."
+            "Use ALERTS_PROVIDER=datadog|cloudwatch|prometheus|pagerduty|opsgenie."
         )
 
     def health_snapshot(self, service: str, start_iso: str, end_iso: str) -> dict[str, Any]:
