@@ -3,8 +3,6 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
-import boto3
-
 from incident_triage_mcp.secrets.loader import SecretsLoader
 
 
@@ -25,6 +23,14 @@ class CloudWatchAPI:
     def _client(self) -> Any:
         if self._cloudwatch_client is not None:
             return self._cloudwatch_client
+
+        try:
+            import boto3  # type: ignore
+        except ModuleNotFoundError as exc:
+            raise RuntimeError(
+                "CloudWatch provider requires optional dependency 'boto3'. "
+                "Install with: pip install 'incident-triage-mcp[aws]'"
+            ) from exc
 
         access_key = self._secrets.get("AWS_ACCESS_KEY_ID")
         secret_key = self._secrets.get("AWS_SECRET_ACCESS_KEY")

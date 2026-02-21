@@ -4,8 +4,6 @@ from datetime import datetime, timezone
 import json
 from typing import Any
 
-import boto3
-
 from incident_triage_mcp.secrets.loader import SecretsLoader
 
 
@@ -26,6 +24,14 @@ class XRayAPI:
     def _client(self) -> Any:
         if self._xray_client is not None:
             return self._xray_client
+
+        try:
+            import boto3  # type: ignore
+        except ModuleNotFoundError as exc:
+            raise RuntimeError(
+                "X-Ray provider requires optional dependency 'boto3'. "
+                "Install with: pip install 'incident-triage-mcp[aws]'"
+            ) from exc
 
         access_key = self._secrets.get("AWS_ACCESS_KEY_ID")
         secret_key = self._secrets.get("AWS_SECRET_ACCESS_KEY")

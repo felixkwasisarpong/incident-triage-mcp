@@ -101,6 +101,9 @@ JIRA_API_TOKEN=***
 # from repo root
 pip install -e .
 
+# if you plan to use AWS-backed adapters/backends (CloudWatch, X-Ray, S3 evidence)
+pip install -e ".[aws]"
+
 # stdio transport (for Claude Desktop)
 MCP_TRANSPORT=stdio incident-triage-mcp
 ```
@@ -172,6 +175,7 @@ AIRFLOW_USERNAME=<airflow-username>
 AIRFLOW_PASSWORD=<airflow-password>
 
 # S3-compatible artifact store (required when EVIDENCE_BACKEND=s3)
+# Requires optional extra: pip install "incident-triage-mcp[aws]"
 S3_ENDPOINT_URL=http://localhost:9000
 S3_BUCKET=triage-artifacts
 S3_REGION=us-east-1
@@ -214,6 +218,7 @@ DATADOG_APP_KEY=<datadog-application-key>
 DATADOG_SITE=datadoghq.com
 
 # CloudWatch settings (used when ALERTS_PROVIDER or METRICS_PROVIDER is cloudwatch)
+# Requires optional extra: pip install "incident-triage-mcp[aws]"
 # Auth can come from env credentials below or IAM role/default AWS credential chain.
 AWS_REGION=us-east-1
 AWS_ACCESS_KEY_ID=<optional-static-key>
@@ -253,6 +258,7 @@ ELASTICSEARCH_PASSWORD=<optional-basic-auth-password>
 ELASTICSEARCH_HTTP_TIMEOUT_SECONDS=10
 
 # X-Ray settings (used when TRACES_PROVIDER=xray)
+# Requires optional extra: pip install "incident-triage-mcp[aws]"
 # Auth can come from env credentials below or IAM role/default AWS credential chain.
 XRAY_REGION=us-east-1
 AWS_ACCESS_KEY_ID=<optional-static-key>
@@ -373,6 +379,7 @@ Use this path to add a new provider with minimal risk.
 5) Document env vars + usage
 
 - Add env vars to `README.md` “Key environment variables”.
+- If provider needs optional SDKs, add/update `pyproject.toml` extras and install instructions.
 - Add one demo call in “Demo flow (agent/host)” if relevant.
 
 Minimal skeleton:
