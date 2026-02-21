@@ -133,6 +133,22 @@ class TestAdapterScaffold(unittest.TestCase):
         self.assertEqual(ctx.exception.kind, "adapter_call_failed")
         self.assertIn("timeout budget", str(ctx.exception.cause))
 
+    def test_resilience_runner_emits_event_sink_records(self) -> None:
+        events: list[dict] = []
+        runner = ResilienceRunner(
+            provider="mock",
+            policy=ResiliencePolicy(retries=0),
+            event_sink=events.append,
+        )
+
+        result = runner.invoke("health_snapshot", lambda: {"ok": True})
+
+        self.assertEqual(result, {"ok": True})
+        self.assertEqual(len(events), 1)
+        self.assertEqual(events[0]["provider"], "mock")
+        self.assertEqual(events[0]["operation"], "health_snapshot")
+        self.assertEqual(events[0]["kind"], "success")
+
     def test_secrets_loader_provider_selection(self) -> None:
         with patch.dict(os.environ, {}, clear=True):
             loader = get_secrets_loader()

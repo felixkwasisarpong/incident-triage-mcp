@@ -141,6 +141,24 @@ class TestServerTools(unittest.TestCase):
         for key in ["transport", "auth_mode", "auth_required", "authenticated", "principal", "request_id"]:
             self.assertIn(key, meta)
 
+    def test_mcp_health(self) -> None:
+        out = self.server.mcp_health()
+        self.assertEqual(out["correlation_id"], "corr-1")
+        self.assertTrue(out["ok"])
+        self.assertIn(out["status"], {"healthy", "degraded"})
+        self.assertIn("uptime_seconds", out)
+        self.assertIn("providers", out)
+        self.assertIn("transport", out)
+
+    def test_mcp_metrics_includes_tool_activity(self) -> None:
+        self.server.ping("probe")
+        out = self.server.mcp_metrics()
+        self.assertEqual(out["correlation_id"], "corr-2")
+        self.assertIn("totals", out)
+        self.assertGreaterEqual(out["totals"]["tool_calls_total"], 1)
+        self.assertIn("ping", out["tools"])
+        self.assertGreaterEqual(out["tools"]["ping"]["calls_total"], 1)
+
     def test_http_auth_api_key_denies_missing_header(self) -> None:
         with patch.dict(
             os.environ,

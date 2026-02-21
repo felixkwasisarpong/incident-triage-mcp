@@ -24,6 +24,8 @@ CORE_TOOLS = {
     "traces_fetch_recent",
     "runbooks_search",
     "ping",
+    "mcp_health",
+    "mcp_metrics",
     "slack_post_update",
     "evidence_get_bundle",
     "evidence_wait_for_bundle",

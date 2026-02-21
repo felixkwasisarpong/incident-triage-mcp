@@ -2,7 +2,10 @@ from __future__ import annotations
 
 import json
 import os
+import time
+from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
+from functools import wraps
 from pathlib import Path
 from typing import Any
 
@@ -24,6 +27,7 @@ from incident_triage_mcp.domain_models import EvidenceBundle
 from incident_triage_mcp.policy.http_auth import HTTPAuthError, verify_api_key, verify_jwt_from_headers
 from incident_triage_mcp.policy.rbac import require_allowed, role
 from incident_triage_mcp.policy.safe_actions import SafeActionContext, enforce, SafeActionError
+from incident_triage_mcp.telemetry import ServiceTelemetry
 from incident_triage_mcp.tools.evidence import load_bundle
 from incident_triage_mcp.tools.incidents import triage_incident_run
 from incident_triage_mcp.tools.jira_draft import build_jira_draft
@@ -55,6 +59,19 @@ _mcp_host = os.getenv("MCP_HOST", CFG.mcp_host or "127.0.0.1")
 _mcp_port = int(os.getenv("MCP_PORT", str(CFG.mcp_port or 8000)))
 mcp = FastMCP("Incident Triage MCP", json_response=True, host=_mcp_host, port=_mcp_port)
 audit = AuditLog()
+telemetry = ServiceTelemetry("incident-triage-mcp")
+
+
+def _record_resilience_event(event: dict[str, Any]) -> None:
+    kind = str(event.get("kind", "adapter_call_failed"))
+    telemetry.observe_adapter(
+        str(event.get("provider", "unknown")),
+        str(event.get("operation", "unknown")),
+        ok=(kind == "success"),
+        latency_ms=float(event.get("elapsed_ms", 0.0)),
+    )
+
+
 observability = build_observability_registry(
     alerts_provider=CFG.alerts_provider,
     metrics_provider=CFG.metrics_provider,
@@ -69,6 +86,7 @@ observability = build_observability_registry(
         circuit_failure_threshold=CFG.adapter_circuit_failure_threshold,
         circuit_open_seconds=CFG.adapter_circuit_open_seconds,
     ),
+    resilience_event_sink=_record_resilience_event,
 )
 # Backward-compatible test hook; currently points at alerts provider adapter.
 datadog = observability.alerts_adapter
@@ -108,6 +126,29 @@ def _request_correlation_id(headers: dict[str, str]) -> str | None:
         if value:
             return value
     return None
+
+
+@contextmanager
+def _tool_observation(tool_name: str):
+    started = time.perf_counter()
+    try:
+        yield
+    except Exception:
+        telemetry.observe_tool(tool_name, ok=False, latency_ms=(time.perf_counter() - started) * 1000.0)
+        raise
+    telemetry.observe_tool(tool_name, ok=True, latency_ms=(time.perf_counter() - started) * 1000.0)
+
+
+def _instrumented_tool(tool_name: str):
+    def _decorate(fn):
+        @wraps(fn)
+        def _wrapped(*args, **kwargs):
+            with _tool_observation(tool_name):
+                return fn(*args, **kwargs)
+
+        return _wrapped
+
+    return _decorate
 
 
 def _assert_audit_meta_complete(meta: dict[str, Any]) -> None:
@@ -158,6 +199,7 @@ def _tool_request_meta(tool_event: str) -> tuple[dict[str, Any], str | None]:
         else:
             raise HTTPAuthError(f"Unsupported MCP_HTTP_AUTH_MODE={mode!r}")
     except HTTPAuthError as e:
+        telemetry.observe_auth_denied()
         _assert_audit_meta_complete(meta)
         audit.write(
             f"{tool_event}.auth_denied",
@@ -345,6 +387,7 @@ def _build_slack_message(
 
 
 @mcp.tool()
+@_instrumented_tool("incident_triage_run")
 def incident_triage_run(
     incident_id: str,
     service: str,
@@ -428,6 +471,7 @@ def incident_triage_run(
 
 
 @mcp.tool()
+@_instrumented_tool("alerts_fetch_active")
 def alerts_fetch_active(services: list[str] = None, since_minutes: int = 30, max_alerts: int = 50) -> dict:
     meta, request_id = _tool_request_meta("alerts.fetch_active")
     services = services or []
@@ -453,6 +497,7 @@ def alerts_fetch_active(services: list[str] = None, since_minutes: int = 30, max
 
 
 @mcp.tool()
+@_instrumented_tool("service_health_snapshot")
 def service_health_snapshot(service: str, start_iso: str, end_iso: str) -> dict:
     meta, request_id = _tool_request_meta("service.health_snapshot")
     args = {"service": service, "start_iso": start_iso, "end_iso": end_iso}
@@ -468,6 +513,7 @@ def service_health_snapshot(service: str, start_iso: str, end_iso: str) -> dict:
 
 
 @mcp.tool()
+@_instrumented_tool("logs_fetch_recent")
 def logs_fetch_recent(service: str, start_iso: str, end_iso: str, limit: int = 100) -> dict:
     meta, request_id = _tool_request_meta("logs.fetch_recent")
     args = {
@@ -488,6 +534,7 @@ def logs_fetch_recent(service: str, start_iso: str, end_iso: str, limit: int = 1
 
 
 @mcp.tool()
+@_instrumented_tool("traces_fetch_recent")
 def traces_fetch_recent(service: str, start_iso: str, end_iso: str, limit: int = 100) -> dict:
     meta, request_id = _tool_request_meta("traces.fetch_recent")
     args = {
@@ -508,6 +555,7 @@ def traces_fetch_recent(service: str, start_iso: str, end_iso: str, limit: int =
 
 
 @mcp.tool()
+@_instrumented_tool("runbooks_search")
 def runbooks_search(query: str, limit: int = 5) -> dict:
     meta, request_id = _tool_request_meta("runbooks.search")
     runbooks_dir = os.getenv("RUNBOOKS_DIR", CFG.runbooks_dir)
@@ -523,6 +571,7 @@ def runbooks_search(query: str, limit: int = 5) -> dict:
 
 
 @mcp.tool()
+@_instrumented_tool("ping")
 def ping(message: str = "hello") -> dict:
     meta, request_id = _tool_request_meta("ping")
     audit.write("ping", {"message": message}, ok=True, meta=meta, correlation_id=request_id)
@@ -530,6 +579,38 @@ def ping(message: str = "hello") -> dict:
 
 
 @mcp.tool()
+@_instrumented_tool("mcp_health")
+def mcp_health() -> dict:
+    meta, request_id = _tool_request_meta("mcp.health")
+    corr = audit.write("mcp.health", {}, ok=True, meta=meta, correlation_id=request_id)
+    airflow_reason = _airflow_disabled_reason()
+    health = telemetry.health()
+    health["correlation_id"] = corr
+    health["transport"] = _active_transport()
+    health["evidence_backend"] = _evidence_backend()
+    health["providers"] = observability.provider_summary()
+    health["airflow"] = {
+        "enabled": airflow_reason == "",
+        "reason": airflow_reason or None,
+    }
+    return health
+
+
+@mcp.tool()
+@_instrumented_tool("mcp_metrics")
+def mcp_metrics() -> dict:
+    meta, request_id = _tool_request_meta("mcp.metrics")
+    corr = audit.write("mcp.metrics", {}, ok=True, meta=meta, correlation_id=request_id)
+    snapshot = telemetry.snapshot()
+    snapshot["correlation_id"] = corr
+    snapshot["transport"] = _active_transport()
+    snapshot["evidence_backend"] = _evidence_backend()
+    snapshot["providers"] = observability.provider_summary()
+    return snapshot
+
+
+@mcp.tool()
+@_instrumented_tool("slack_post_update")
 def slack_post_update(
     incident_id: str,
     service: str | None = None,
@@ -618,6 +699,7 @@ def slack_post_update(
         }
 
 
+@_instrumented_tool("airflow_trigger_incident_dag")
 def airflow_trigger_incident_dag(incident_id: str, service: str) -> dict:
     meta, request_id = _tool_request_meta("airflow.trigger_incident_dag")
     dag_id = "incident_evidence_v1"
@@ -644,6 +726,7 @@ def airflow_trigger_incident_dag(incident_id: str, service: str) -> dict:
         }
 
 
+@_instrumented_tool("airflow_get_incident_artifact")
 def airflow_get_incident_artifact(incident_id: str) -> dict:
     meta, request_id = _tool_request_meta("airflow.get_incident_artifact")
     corr = audit.write(
@@ -675,6 +758,7 @@ def airflow_get_incident_artifact(incident_id: str) -> dict:
 
 
 @mcp.tool()
+@_instrumented_tool("evidence_get_bundle")
 def evidence_get_bundle(incident_id: str) -> dict:
     meta, request_id = _tool_request_meta("evidence.get_bundle")
     backend = _evidence_backend()
@@ -727,6 +811,7 @@ def evidence_get_bundle(incident_id: str) -> dict:
 
 
 @mcp.tool()
+@_instrumented_tool("evidence_wait_for_bundle")
 def evidence_wait_for_bundle(incident_id: str, timeout_seconds: int = 30, poll_seconds: int = 2) -> dict:
     meta, request_id = _tool_request_meta("evidence.wait_for_bundle")
     corr = audit.write(
@@ -746,6 +831,7 @@ def evidence_wait_for_bundle(incident_id: str, timeout_seconds: int = 30, poll_s
 
 
 @mcp.tool()
+@_instrumented_tool("evidence_seed_sample")
 def evidence_seed_sample(incident_id: str, service: str, window_minutes: int = 30) -> dict:
     """
     Offline helper: writes a deterministic Evidence Bundle v1 JSON to EVIDENCE_DIR.
@@ -831,6 +917,7 @@ def evidence_seed_sample(incident_id: str, service: str, window_minutes: int = 3
 
 
 @mcp.tool()
+@_instrumented_tool("incident_triage_summary")
 def incident_triage_summary(incident_id: str) -> dict:
     """
     Deterministic (non-LLM) summary of an incident from the Evidence Bundle.
@@ -857,6 +944,7 @@ def incident_triage_summary(incident_id: str) -> dict:
 
 
 @mcp.tool()
+@_instrumented_tool("jira_draft_ticket")
 def jira_draft_ticket(incident_id: str, project_key: str | None = None) -> dict:
     meta, request_id = _tool_request_meta("jira.draft_ticket")
     resolved_project_key = _jira_project_key(project_key)
@@ -886,6 +974,7 @@ def jira_draft_ticket(incident_id: str, project_key: str | None = None) -> dict:
 
 
 @mcp.tool()
+@_instrumented_tool("jira_create_ticket")
 def jira_create_ticket(
     incident_id: str,
     project_key: str | None = None,
@@ -1011,6 +1100,7 @@ def jira_create_ticket(
 
 
 @mcp.tool()
+@_instrumented_tool("jira_list_projects")
 def jira_list_projects() -> dict:
     meta, request_id = _tool_request_meta("jira.list_projects")
     provider = provider_name()
@@ -1031,6 +1121,7 @@ def jira_list_projects() -> dict:
 
 
 @mcp.tool()
+@_instrumented_tool("jira_list_issue_types")
 def jira_list_issue_types(project_key: str | None = None) -> dict:
     meta, request_id = _tool_request_meta("jira.list_issue_types")
     provider = provider_name()
@@ -1065,6 +1156,7 @@ def jira_list_issue_types(project_key: str | None = None) -> dict:
 
 
 @mcp.tool()
+@_instrumented_tool("jira_validate_credentials")
 def jira_validate_credentials() -> dict:
     meta, request_id = _tool_request_meta("jira.validate_credentials")
     corr = audit.write(

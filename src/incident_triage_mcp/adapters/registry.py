@@ -110,6 +110,7 @@ class ObservabilityRegistry:
     traces_provider: str
     secrets: SecretsLoader
     resilience_policy: ResiliencePolicy
+    resilience_event_sink: Callable[[dict[str, Any]], None] | None = None
 
     def __post_init__(self) -> None:
         _register_builtin_providers()
@@ -131,18 +132,22 @@ class ObservabilityRegistry:
         self._alerts_runner = ResilienceRunner(
             provider=self.alerts_provider,
             policy=self.resilience_policy,
+            event_sink=self.resilience_event_sink,
         )
         self._metrics_runner = ResilienceRunner(
             provider=self.metrics_provider,
             policy=self.resilience_policy,
+            event_sink=self.resilience_event_sink,
         )
         self._logs_runner = ResilienceRunner(
             provider=self.logs_provider,
             policy=self.resilience_policy,
+            event_sink=self.resilience_event_sink,
         )
         self._traces_runner = ResilienceRunner(
             provider=self.traces_provider,
             policy=self.resilience_policy,
+            event_sink=self.resilience_event_sink,
         )
 
     def provider_summary(self) -> dict[str, str]:
@@ -232,6 +237,7 @@ def build_observability_registry(
     traces_provider: str,
     secrets: SecretsLoader,
     resilience_policy: ResiliencePolicy | None = None,
+    resilience_event_sink: Callable[[dict[str, Any]], None] | None = None,
 ) -> ObservabilityRegistry:
     return ObservabilityRegistry(
         alerts_provider=alerts_provider,
@@ -240,4 +246,5 @@ def build_observability_registry(
         traces_provider=traces_provider,
         secrets=secrets,
         resilience_policy=resilience_policy or ResiliencePolicy(),
+        resilience_event_sink=resilience_event_sink,
     )

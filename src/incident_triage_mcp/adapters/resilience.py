@@ -51,11 +51,22 @@ class ResilienceRunner:
     provider: str
     policy: ResiliencePolicy = field(default_factory=ResiliencePolicy)
     _circuits: dict[str, _CircuitState] = field(default_factory=dict)
+    event_sink: Callable[[dict[str, Any]], None] | None = None
 
     def invoke(self, operation: str, fn: Callable[..., Any], *args: Any, **kwargs: Any) -> Any:
         state = self._circuits.setdefault(operation, _CircuitState())
         now = time.monotonic()
         if now < state.open_until:
+            if self.event_sink:
+                self.event_sink(
+                    {
+                        "provider": self.provider,
+                        "operation": operation,
+                        "kind": "circuit_open",
+                        "attempts": 0,
+                        "elapsed_ms": 0.0,
+                    }
+                )
             raise ResilienceError(
                 provider=self.provider,
                 operation=operation,
@@ -82,6 +93,16 @@ class ResilienceRunner:
                     )
                 state.failure_count = 0
                 state.open_until = 0.0
+                if self.event_sink:
+                    self.event_sink(
+                        {
+                            "provider": self.provider,
+                            "operation": operation,
+                            "kind": "success",
+                            "attempts": attempt,
+                            "elapsed_ms": round(elapsed * 1000.0, 3),
+                        }
+                    )
                 return result
             except Exception as exc:  # pragma: no cover - branches covered in tests
                 last_exc = exc
@@ -98,6 +119,18 @@ class ResilienceRunner:
                 time.sleep(backoff)
 
         message = f"{self.provider}.{operation} failed after {total_attempts} attempt(s)"
+        if self.event_sink:
+            elapsed = time.monotonic() - started
+            self.event_sink(
+                {
+                    "provider": self.provider,
+                    "operation": operation,
+                    "kind": "adapter_call_failed",
+                    "attempts": total_attempts,
+                    "elapsed_ms": round(elapsed * 1000.0, 3),
+                    "cause": str(last_exc) if last_exc else None,
+                }
+            )
         raise ResilienceError(
             provider=self.provider,
             operation=operation,
