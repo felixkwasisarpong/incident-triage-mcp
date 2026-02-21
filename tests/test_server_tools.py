@@ -290,6 +290,65 @@ class TestServerTools(unittest.TestCase):
 
         post_mock.assert_not_called()
 
+    def test_teams_post_update_dry_run(self) -> None:
+        out = self.server.teams_post_update(
+            incident_id="INC-200",
+            service="payments-api",
+            summary={"status": "triage_started", "alerts_count": 2, "next_steps": ["Check logs"]},
+            ticket={"dry_run": True},
+        )
+
+        self.assertEqual(out["correlation_id"], "corr-1")
+        self.assertFalse(out["posted"])
+        self.assertTrue(out["dry_run"])
+        self.assertIn("payload", out)
+        self.assertEqual(out["payload"]["@type"], "MessageCard")
+        self.assertIn("Incident Update", out["payload"]["title"])
+
+    def test_teams_post_update_live_missing_webhook(self) -> None:
+        with patch.dict(os.environ, {"TEAMS_WEBHOOK_URL": ""}, clear=False):
+            out = self.server.teams_post_update(
+                incident_id="INC-201",
+                service="payments-api",
+                dry_run=False,
+            )
+
+        self.assertEqual(out["correlation_id"], "corr-1")
+        self.assertFalse(out["posted"])
+        self.assertFalse(out["dry_run"])
+        self.assertIn("TEAMS_WEBHOOK_URL", out["error"])
+
+    def test_teams_post_update_live_success(self) -> None:
+        with patch.dict(os.environ, {"TEAMS_WEBHOOK_URL": "https://hooks.teams.test/abc"}, clear=False), patch.object(
+            self.server, "post_teams_webhook"
+        ) as post_mock:
+            out = self.server.teams_post_update(
+                incident_id="INC-202",
+                service="payments-api",
+                channel="Incident Triage",
+                dry_run=False,
+            )
+
+        post_mock.assert_called_once()
+        payload = post_mock.call_args.args[1]
+        self.assertEqual(payload["@type"], "MessageCard")
+        self.assertIn("INC-202", payload["title"])
+        self.assertTrue(out["posted"])
+        self.assertFalse(out["dry_run"])
+
+    def test_teams_post_update_live_rbac_denied(self) -> None:
+        with patch.dict(os.environ, {"MCP_ROLE": "triager"}, clear=False):
+            server = self._reload_and_attach()
+            with patch.object(server, "post_teams_webhook") as post_mock:
+                with self.assertRaises(RuntimeError):
+                    server.teams_post_update(
+                        incident_id="INC-203",
+                        service="payments-api",
+                        dry_run=False,
+                    )
+
+        post_mock.assert_not_called()
+
     def test_incident_triage_run(self) -> None:
         with patch.object(self.server, "triage_incident_run", return_value={"status": "ok"}) as run_mock:
             out = self.server.incident_triage_run("INC-1", "payments-api")
@@ -397,6 +456,55 @@ class TestServerTools(unittest.TestCase):
         self.assertFalse(out["slack"]["posted"])
         self.assertFalse(out["slack"]["dry_run"])
         self.assertIn("timeout", out["slack"]["error"])
+
+    def test_incident_triage_run_with_teams_notify(self) -> None:
+        with patch.object(
+            self.server,
+            "triage_incident_run",
+            return_value={"status": "ok", "summary": {"status": "triage_started"}, "ticket": {"issue_key": "PAY-1"}},
+        ), patch.object(
+            self.server,
+            "teams_post_update",
+            return_value={"posted": False, "dry_run": True, "payload": {"title": "preview"}},
+        ) as teams_mock:
+            out = self.server.incident_triage_run(
+                "INC-6",
+                "payments-api",
+                notify_slack=True,
+                notify_provider="teams",
+                slack_channel="Incident Triage",
+                slack_dry_run=True,
+            )
+
+        self.assertEqual(out["correlation_id"], "corr-1")
+        self.assertIn("teams", out)
+        teams_mock.assert_called_once_with(
+            incident_id="INC-6",
+            service="payments-api",
+            summary={"status": "triage_started"},
+            ticket={"issue_key": "PAY-1"},
+            channel="Incident Triage",
+            dry_run=True,
+        )
+
+    def test_incident_triage_run_with_teams_notify_handles_error(self) -> None:
+        with patch.object(
+            self.server,
+            "triage_incident_run",
+            return_value={"status": "ok", "summary": {"status": "triage_started"}},
+        ), patch.object(self.server, "teams_post_update", side_effect=RuntimeError("teams webhook timeout")):
+            out = self.server.incident_triage_run(
+                "INC-7",
+                "payments-api",
+                notify_slack=True,
+                notify_provider="teams",
+                slack_dry_run=False,
+            )
+
+        self.assertEqual(out["correlation_id"], "corr-1")
+        self.assertFalse(out["teams"]["posted"])
+        self.assertFalse(out["teams"]["dry_run"])
+        self.assertIn("timeout", out["teams"]["error"])
 
     def test_alerts_fetch_active(self) -> None:
         alerts = [

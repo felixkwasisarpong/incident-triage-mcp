@@ -54,6 +54,7 @@ class AppConfig:
     metrics_provider: str
     logs_provider: str
     traces_provider: str
+    notify_provider: str
 
     # HTTP auth boundary
     http_auth_mode: str
@@ -105,6 +106,7 @@ def load_config() -> AppConfig:
         metrics_provider=(_env("METRICS_PROVIDER", "mock") or "mock").lower(),
         logs_provider=(_env("LOGS_PROVIDER", "mock") or "mock").lower(),
         traces_provider=(_env("TRACES_PROVIDER", "mock") or "mock").lower(),
+        notify_provider=(_env("NOTIFY_PROVIDER", "slack") or "slack").lower(),
 
         http_auth_mode=(_env("MCP_HTTP_AUTH_MODE", "none") or "none").lower(),
         http_api_key=_env("MCP_HTTP_API_KEY"),
@@ -156,6 +158,8 @@ def load_config() -> AppConfig:
         if value not in allowed:
             allowed_str = ", ".join(sorted(allowed))
             raise ConfigError(f"{env_name} must be one of: {allowed_str}")
+    if cfg.notify_provider not in {"slack", "teams"}:
+        raise ConfigError("NOTIFY_PROVIDER must be one of: slack, teams")
 
     ticket_provider = (_env("JIRA_PROVIDER", "mock") or "mock").lower()
     if ticket_provider not in {"mock", "cloud", "servicenow"}:

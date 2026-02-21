@@ -37,7 +37,7 @@ It exposes structured, auditable triage tools (evidence collection, runbook sear
 - **Pluggable integrations:** mock-first, real adapters added progressively (env-based provider selection)
 - **Safe ticketing:** draft Jira tickets + gated create (dry-run by default, RBAC + confirm token)
 - **Real idempotency for creates:** reusing `idempotency_key` returns the existing issue
-- **Slack updates:** post incident summary + ticket context (safe dry-run by default)
+- **Slack/Teams updates:** post incident summary + ticket context (safe dry-run by default)
 - **Jira discovery tools:** list accessible projects and project-specific issue types (read-only)
 - **Jira Cloud rich text:** draft content renders as clean ADF (H2 section headings + bullet lists + inline bold/code)
 - **Demo-friendly tools:** `evidence.wait_for_bundle` and deterministic `incident.triage_summary`
@@ -207,9 +207,16 @@ SERVICENOW_PASSWORD=***
 SERVICENOW_TABLE=incident
 SERVICENOW_CATEGORY=inquiry
 
-# Slack notifications
+# Notification provider
+NOTIFY_PROVIDER=slack|teams
+
+# Slack notifications (used when NOTIFY_PROVIDER=slack)
 SLACK_WEBHOOK_URL=https://hooks.slack.com/services/...
 SLACK_DEFAULT_CHANNEL=#incident-triage
+
+# Teams notifications (used when NOTIFY_PROVIDER=teams)
+TEAMS_WEBHOOK_URL=https://outlook.office.com/webhook/...
+TEAMS_DEFAULT_CHANNEL="Incident Triage"
 
 # Idempotency storage for ticket create retries
 # file (default) keeps local/dev behavior; redis/postgres are durable backends for prod.
@@ -647,9 +654,10 @@ Typical demo sequence:
 4) Optional one-call orchestration (safe ticket dry-run hook):
    - `incident_triage_run(incident_id="INC-123", service="payments-api", include_ticket=true)`
    - Override project key for the ticket hook: `incident_triage_run(incident_id="INC-123", service="payments-api", include_ticket=true, project_key="PAY")`
-5) Optional Slack notification hook (safe dry-run by default):
+5) Optional notification hook (safe dry-run by default):
    - `incident_triage_run(incident_id="INC-123", service="payments-api", notify_slack=true)`
-   - Set channel and send for real: `incident_triage_run(incident_id="INC-123", service="payments-api", notify_slack=true, slack_channel="#incident-triage", slack_dry_run=false)`
+   - Slack live send: `incident_triage_run(incident_id="INC-123", service="payments-api", notify_slack=true, notify_provider="slack", slack_channel="#incident-triage", slack_dry_run=false)`
+   - Teams live send: `incident_triage_run(incident_id="INC-123", service="payments-api", notify_slack=true, notify_provider="teams", slack_channel="Incident Triage", slack_dry_run=false)`
 
 ---
 
@@ -676,7 +684,8 @@ Typical demo sequence:
 
 Notes:
 - Non-dry-run is blocked unless **RBAC** allows it (`MCP_ROLE=responder|admin`) and `CONFIRM_TOKEN` is provided.
-- Non-dry-run Slack posts are also RBAC-gated (`slack.post_update`, allowed for `MCP_ROLE=responder|admin`).
+- Non-dry-run Slack posts are RBAC-gated (`slack.post_update`, allowed for `MCP_ROLE=responder|admin`).
+- Non-dry-run Teams posts are RBAC-gated (`teams.post_update`, allowed for `MCP_ROLE=responder|admin`).
 - Swap providers via env: `JIRA_PROVIDER=mock` (demo), `JIRA_PROVIDER=cloud` (real Jira Cloud), or `JIRA_PROVIDER=servicenow` (real ServiceNow).
 - `JIRA_ISSUE_TYPE` defaults to `Task` (used for creates unless overridden in code).
 - Jira Cloud descriptions are sent as ADF and render section headers/bullets/inline formatting in the Jira UI.
