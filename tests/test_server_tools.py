@@ -147,6 +147,7 @@ class TestServerTools(unittest.TestCase):
         self.assertTrue(out["ok"])
         self.assertIn(out["status"], {"healthy", "degraded"})
         self.assertIn("uptime_seconds", out)
+        self.assertFalse(out["bundle_only_mode"])
         self.assertIn("providers", out)
         self.assertIn("transport", out)
 
@@ -227,6 +228,7 @@ class TestServerTools(unittest.TestCase):
         out = self.server._http_health_payload()
         self.assertTrue(out["ok"])
         self.assertIn("service", out)
+        self.assertIn("bundle_only_mode", out)
         self.assertIn("providers", out)
         self.assertIn("transport", out)
         self.assertIn("evidence_backend", out)
@@ -238,10 +240,46 @@ class TestServerTools(unittest.TestCase):
         self.assertIn("service", out)
         self.assertIn("totals", out)
         self.assertIn("tracing", out)
+        self.assertIn("bundle_only_mode", out)
         self.assertIn("tools", out)
         self.assertIn("providers", out)
         self.assertIn("transport", out)
         self.assertIn("evidence_backend", out)
+
+    def test_bundle_only_mode_disables_observability_tools(self) -> None:
+        with patch.dict(os.environ, {"BUNDLE_ONLY_MODE": "true"}, clear=False):
+            server = self._reload_and_attach()
+            with patch.object(server.observability, "fetch_active_alerts") as alerts_mock, patch.object(
+                server.observability, "health_snapshot"
+            ) as health_mock, patch.object(server.observability, "fetch_logs") as logs_mock, patch.object(
+                server.observability, "fetch_traces"
+            ) as traces_mock:
+                alerts = server.alerts_fetch_active(["payments-api"])
+                snapshot = server.service_health_snapshot(
+                    "payments-api",
+                    "2026-01-01T00:00:00Z",
+                    "2026-01-01T00:30:00Z",
+                )
+                logs = server.logs_fetch_recent(
+                    "payments-api",
+                    "2026-01-01T00:00:00Z",
+                    "2026-01-01T00:30:00Z",
+                )
+                traces = server.traces_fetch_recent(
+                    "payments-api",
+                    "2026-01-01T00:00:00Z",
+                    "2026-01-01T00:30:00Z",
+                )
+
+        alerts_mock.assert_not_called()
+        health_mock.assert_not_called()
+        logs_mock.assert_not_called()
+        traces_mock.assert_not_called()
+        self.assertEqual(alerts["error"]["kind"], "disabled")
+        self.assertEqual(snapshot["error"]["kind"], "disabled")
+        self.assertEqual(logs["error"]["kind"], "disabled")
+        self.assertEqual(traces["error"]["kind"], "disabled")
+        self.assertTrue(alerts["error"]["bundle_only_mode"])
 
     def test_http_auth_api_key_denies_missing_header(self) -> None:
         with patch.dict(

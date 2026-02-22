@@ -144,6 +144,7 @@ DEPLOYMENT_PROFILE=local|staging|prod
 MCP_TRANSPORT=stdio|streamable-http
 MCP_HOST=0.0.0.0
 MCP_PORT=3333
+BUNDLE_ONLY_MODE=false          # when true, disables direct observability fetch tools
 
 # Internal tracing (in-memory span buffer)
 MCP_TRACE_ENABLED=true
@@ -344,8 +345,8 @@ Profile guardrails enforced by config:
 | Profile | Guardrails |
 |---|---|
 | `local` | Mock providers and file idempotency are allowed for fast dev loops. |
-| `staging` | If `MCP_TRANSPORT=streamable-http`, auth cannot be `none`; provider-specific env vars are validated. |
-| `prod` | `AUDIT_MODE=stdout`; alerts/metrics providers cannot be `mock`; evidence backend cannot be `none`; idempotency backend must be `redis` or `postgres`. |
+| `staging` | If `MCP_TRANSPORT=streamable-http`, auth cannot be `none`; provider-specific env vars are validated unless `BUNDLE_ONLY_MODE=true`. |
+| `prod` | `AUDIT_MODE=stdout`; evidence backend cannot be `none`; idempotency backend must be `redis` or `postgres`. Alerts/metrics can stay `mock` only when `BUNDLE_ONLY_MODE=true`. |
 
 Adapter env matrix (validated when selected in `staging`/`prod`):
 
@@ -401,6 +402,14 @@ The process will fail fast if prod requirements are not met (for example mock al
 - Keep `dry_run=true` for mutating tools in initial production canaries.
 - Alert on `mcp_metrics().totals.adapter_errors_total` and `mcp_metrics().totals.auth_denied_total`.
 - Alert on `mcp_metrics().tracing.export_errors_total` when OTLP export is enabled.
+
+### Bundle-Only mode (minimal MCP env)
+
+If Airflow is already collecting + normalizing data into Evidence Bundles, you can run MCP in artifact-consumer mode:
+
+- Set `BUNDLE_ONLY_MODE=true`
+- Keep `EVIDENCE_BACKEND=airflow|fs|s3` (not `none`)
+- MCP disables direct observability fetch tools (`alerts_fetch_active`, `service_health_snapshot`, `logs_fetch_recent`, `traces_fetch_recent`) and relies on bundle tools (`evidence_get_bundle`, `incident_triage_summary`, ticket/notify flows)
 
 ---
 

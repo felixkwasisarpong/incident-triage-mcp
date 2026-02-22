@@ -462,6 +462,7 @@ def _http_health_payload() -> dict[str, Any]:
     health = telemetry.health()
     health["tracing"] = telemetry.snapshot().get("tracing", {})
     health["tracing"]["otlp_export"] = _otlp_export_status()
+    health["bundle_only_mode"] = CFG.bundle_only_mode
     health["transport"] = _active_transport()
     health["evidence_backend"] = _evidence_backend()
     health["providers"] = observability.provider_summary()
@@ -475,6 +476,7 @@ def _http_health_payload() -> dict[str, Any]:
 def _http_metrics_payload() -> dict[str, Any]:
     snapshot = telemetry.snapshot()
     snapshot.setdefault("tracing", {})["otlp_export"] = _otlp_export_status()
+    snapshot["bundle_only_mode"] = CFG.bundle_only_mode
     snapshot["transport"] = _active_transport()
     snapshot["evidence_backend"] = _evidence_backend()
     snapshot["providers"] = observability.provider_summary()
@@ -649,6 +651,18 @@ def _notify_provider(provider: str | None = None) -> str:
     return "slack"
 
 
+def _observability_disabled_error(operation: str) -> dict[str, Any]:
+    return {
+        "kind": "disabled",
+        "operation": operation,
+        "bundle_only_mode": True,
+        "message": (
+            "BUNDLE_ONLY_MODE=true disables direct observability fetch tools. "
+            "Use normalized evidence bundles (e.g., via Airflow) and consume them via evidence_get_bundle."
+        ),
+    }
+
+
 def _normalized_idempotency_key(idempotency_key: str | None) -> str | None:
     if not idempotency_key:
         return None
@@ -794,6 +808,16 @@ def alerts_fetch_active(services: list[str] = None, since_minutes: int = 30, max
     args = {"services": services, "since_minutes": since_minutes, "max_alerts": max_alerts}
     corr = audit.write("alerts.fetch_active", args, ok=True, meta=meta, correlation_id=request_id)
 
+    if CFG.bundle_only_mode:
+        err = _observability_disabled_error("fetch_active_alerts")
+        audit.write("alerts.fetch_active.disabled", {"error": err}, ok=False)
+        return {
+            "correlation_id": corr,
+            "alerts": [],
+            "grouping": {"by_service": {}},
+            "error": err,
+        }
+
     try:
         alerts = observability.fetch_active_alerts(services, since_minutes, max_alerts)
     except ResilienceError as e:
@@ -819,6 +843,11 @@ def service_health_snapshot(service: str, start_iso: str, end_iso: str) -> dict:
     args = {"service": service, "start_iso": start_iso, "end_iso": end_iso}
     corr = audit.write("service.health_snapshot", args, ok=True, meta=meta, correlation_id=request_id)
 
+    if CFG.bundle_only_mode:
+        err = _observability_disabled_error("health_snapshot")
+        audit.write("service.health_snapshot.disabled", {"error": err}, ok=False)
+        return {"correlation_id": corr, "snapshot": {}, "error": err}
+
     try:
         snap = observability.health_snapshot(service, start_iso, end_iso)
     except ResilienceError as e:
@@ -840,6 +869,11 @@ def logs_fetch_recent(service: str, start_iso: str, end_iso: str, limit: int = 1
     }
     corr = audit.write("logs.fetch_recent", args, ok=True, meta=meta, correlation_id=request_id)
 
+    if CFG.bundle_only_mode:
+        err = _observability_disabled_error("fetch_logs")
+        audit.write("logs.fetch_recent.disabled", {"error": err}, ok=False)
+        return {"correlation_id": corr, "logs": [], "error": err}
+
     try:
         logs = observability.fetch_logs(service, start_iso, end_iso, limit)
     except ResilienceError as e:
@@ -860,6 +894,11 @@ def traces_fetch_recent(service: str, start_iso: str, end_iso: str, limit: int =
         "limit": limit,
     }
     corr = audit.write("traces.fetch_recent", args, ok=True, meta=meta, correlation_id=request_id)
+
+    if CFG.bundle_only_mode:
+        err = _observability_disabled_error("fetch_traces")
+        audit.write("traces.fetch_recent.disabled", {"error": err}, ok=False)
+        return {"correlation_id": corr, "traces": [], "error": err}
 
     try:
         traces = observability.fetch_traces(service, start_iso, end_iso, limit)
