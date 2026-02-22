@@ -156,8 +156,27 @@ class TestServerTools(unittest.TestCase):
         self.assertEqual(out["correlation_id"], "corr-2")
         self.assertIn("totals", out)
         self.assertGreaterEqual(out["totals"]["tool_calls_total"], 1)
+        self.assertIn("tracing", out)
+        self.assertIn("spans_total", out["tracing"])
         self.assertIn("ping", out["tools"])
         self.assertGreaterEqual(out["tools"]["ping"]["calls_total"], 1)
+
+    def test_mcp_traces_recent_returns_span_rows(self) -> None:
+        self.server.ping("one")
+        self.server.ping("two")
+
+        out = self.server.mcp_traces_recent(limit=2)
+        self.assertEqual(out["correlation_id"], "corr-3")
+        self.assertIn("traces", out)
+        self.assertLessEqual(len(out["traces"]), 2)
+        self.assertIn("tracing", out)
+        self.assertIn("enabled", out["tracing"])
+        if out["traces"]:
+            row = out["traces"][0]
+            self.assertEqual(row["tool_name"], "ping")
+            self.assertIn("trace_id", row)
+            self.assertIn("span_id", row)
+            self.assertIn("ok", row)
 
     def test_http_health_payload_shape(self) -> None:
         out = self.server._http_health_payload()
@@ -173,6 +192,7 @@ class TestServerTools(unittest.TestCase):
         out = self.server._http_metrics_payload()
         self.assertIn("service", out)
         self.assertIn("totals", out)
+        self.assertIn("tracing", out)
         self.assertIn("tools", out)
         self.assertIn("providers", out)
         self.assertIn("transport", out)

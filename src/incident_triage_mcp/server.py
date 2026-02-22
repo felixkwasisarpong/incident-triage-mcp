@@ -63,7 +63,17 @@ _mcp_host = os.getenv("MCP_HOST", CFG.mcp_host or "127.0.0.1")
 _mcp_port = int(os.getenv("MCP_PORT", str(CFG.mcp_port or 8000)))
 mcp = FastMCP("Incident Triage MCP", json_response=True, host=_mcp_host, port=_mcp_port)
 audit = AuditLog()
-telemetry = ServiceTelemetry("incident-triage-mcp")
+_trace_enabled_env = (os.getenv("MCP_TRACE_ENABLED") or "true").strip().lower()
+_trace_enabled = _trace_enabled_env not in {"0", "false", "no", "off"}
+try:
+    _trace_buffer_size = int((os.getenv("MCP_TRACE_BUFFER_SIZE") or "200").strip() or "200")
+except ValueError:
+    _trace_buffer_size = 200
+telemetry = ServiceTelemetry(
+    "incident-triage-mcp",
+    trace_enabled=_trace_enabled,
+    trace_buffer_size=_trace_buffer_size,
+)
 
 
 def _record_resilience_event(event: dict[str, Any]) -> None:
@@ -133,21 +143,51 @@ def _request_correlation_id(headers: dict[str, str]) -> str | None:
 
 
 @contextmanager
-def _tool_observation(tool_name: str):
+def _tool_observation(
+    tool_name: str,
+    *,
+    request_id: str | None = None,
+    transport: str | None = None,
+):
+    trace_id = telemetry.new_trace_id()
+    span_id = telemetry.new_span_id()
     started = time.perf_counter()
     try:
         yield
-    except Exception:
-        telemetry.observe_tool(tool_name, ok=False, latency_ms=(time.perf_counter() - started) * 1000.0)
+    except Exception as exc:
+        telemetry.observe_tool_with_trace(
+            tool_name,
+            ok=False,
+            latency_ms=(time.perf_counter() - started) * 1000.0,
+            trace_id=trace_id,
+            span_id=span_id,
+            request_id=request_id,
+            transport=transport,
+            error=f"{exc.__class__.__name__}: {exc}",
+        )
         raise
-    telemetry.observe_tool(tool_name, ok=True, latency_ms=(time.perf_counter() - started) * 1000.0)
+    telemetry.observe_tool_with_trace(
+        tool_name,
+        ok=True,
+        latency_ms=(time.perf_counter() - started) * 1000.0,
+        trace_id=trace_id,
+        span_id=span_id,
+        request_id=request_id,
+        transport=transport,
+    )
 
 
 def _instrumented_tool(tool_name: str):
     def _decorate(fn):
         @wraps(fn)
         def _wrapped(*args, **kwargs):
-            with _tool_observation(tool_name):
+            headers = _request_headers()
+            request_id = _request_correlation_id(headers)
+            with _tool_observation(
+                tool_name,
+                request_id=request_id,
+                transport=_active_transport(),
+            ):
                 return fn(*args, **kwargs)
 
         return _wrapped
@@ -267,6 +307,24 @@ def _register_http_health_routes() -> None:
     @custom_route("/metrics", methods=["GET"], include_in_schema=False)
     async def _metrics(_request):  # pragma: no cover - exercised in HTTP runtime
         return JSONResponse(_http_metrics_payload())
+
+    @custom_route("/traces", methods=["GET"], include_in_schema=False)
+    async def _traces(request):  # pragma: no cover - exercised in HTTP runtime
+        raw_limit = "25"
+        try:
+            raw_limit = str(request.query_params.get("limit", "25"))
+        except Exception:
+            pass
+        try:
+            limit = max(1, int(raw_limit))
+        except ValueError:
+            limit = 25
+        return JSONResponse(
+            {
+                "traces": telemetry.recent_traces(limit),
+                "tracing": telemetry.snapshot().get("tracing", {}),
+            }
+        )
 
 
 def _build_idempotency_store() -> IdempotencyStore:
@@ -662,6 +720,24 @@ def mcp_metrics() -> dict:
     snapshot = _http_metrics_payload()
     snapshot["correlation_id"] = corr
     return snapshot
+
+
+@mcp.tool()
+@_instrumented_tool("mcp_traces_recent")
+def mcp_traces_recent(limit: int = 25) -> dict:
+    meta, request_id = _tool_request_meta("mcp.traces_recent")
+    corr = audit.write(
+        "mcp.traces_recent",
+        {"limit": limit},
+        ok=True,
+        meta=meta,
+        correlation_id=request_id,
+    )
+    return {
+        "correlation_id": corr,
+        "traces": telemetry.recent_traces(limit),
+        "tracing": telemetry.snapshot().get("tracing", {}),
+    }
 
 
 @mcp.tool()

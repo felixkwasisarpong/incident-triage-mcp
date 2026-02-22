@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+from datetime import datetime, timezone
+import secrets
 import time
+from collections import deque
 from dataclasses import dataclass
 from threading import Lock
 from typing import Any
@@ -36,18 +39,69 @@ class _Stats:
 
 
 class ServiceTelemetry:
-    def __init__(self, service_name: str) -> None:
+    def __init__(
+        self,
+        service_name: str,
+        *,
+        trace_enabled: bool = True,
+        trace_buffer_size: int = 200,
+    ) -> None:
         self._service_name = service_name
         self._started_at = time.time()
         self._lock = Lock()
         self._tool_stats: dict[str, _Stats] = {}
         self._adapter_stats: dict[str, _Stats] = {}
         self._auth_denied_total = 0
+        self._trace_enabled = bool(trace_enabled)
+        self._trace_buffer_size = max(1, int(trace_buffer_size))
+        self._trace_spans_total = 0
+        self._trace_dropped_total = 0
+        self._trace_events: deque[dict[str, Any]] = deque(maxlen=self._trace_buffer_size)
+
+    def new_trace_id(self) -> str:
+        # 16 bytes => 32 hex chars (trace-id style width)
+        return secrets.token_hex(16)
+
+    def new_span_id(self) -> str:
+        # 8 bytes => 16 hex chars (span-id style width)
+        return secrets.token_hex(8)
 
     def observe_tool(self, tool_name: str, *, ok: bool, latency_ms: float) -> None:
         with self._lock:
             stats = self._tool_stats.setdefault(tool_name, _Stats())
             stats.observe(ok=ok, latency_ms=max(0.0, latency_ms))
+
+    def observe_tool_with_trace(
+        self,
+        tool_name: str,
+        *,
+        ok: bool,
+        latency_ms: float,
+        trace_id: str,
+        span_id: str,
+        request_id: str | None = None,
+        transport: str | None = None,
+        error: str | None = None,
+    ) -> None:
+        event = {
+            "timestamp_iso": datetime.now(timezone.utc).isoformat(),
+            "tool_name": tool_name,
+            "ok": bool(ok),
+            "latency_ms": round(max(0.0, latency_ms), 3),
+            "trace_id": trace_id,
+            "span_id": span_id,
+            "request_id": request_id,
+            "transport": transport,
+            "error": error,
+        }
+        with self._lock:
+            stats = self._tool_stats.setdefault(tool_name, _Stats())
+            stats.observe(ok=ok, latency_ms=max(0.0, latency_ms))
+            self._trace_spans_total += 1
+            if self._trace_enabled:
+                if len(self._trace_events) >= self._trace_buffer_size:
+                    self._trace_dropped_total += 1
+                self._trace_events.append(event)
 
     def observe_adapter(
         self,
@@ -66,6 +120,14 @@ class ServiceTelemetry:
         with self._lock:
             self._auth_denied_total += 1
 
+    def recent_traces(self, limit: int = 25) -> list[dict[str, Any]]:
+        cap = max(1, int(limit))
+        with self._lock:
+            rows = list(self._trace_events)[-cap:]
+        # Return newest first.
+        rows.reverse()
+        return rows
+
     def snapshot(self) -> dict[str, Any]:
         with self._lock:
             tool_calls = sum(v.calls_total for v in self._tool_stats.values())
@@ -75,6 +137,8 @@ class ServiceTelemetry:
             tools = {name: stats.to_dict() for name, stats in sorted(self._tool_stats.items())}
             adapters = {name: stats.to_dict() for name, stats in sorted(self._adapter_stats.items())}
             auth_denied = self._auth_denied_total
+            trace_spans_total = self._trace_spans_total
+            trace_dropped_total = self._trace_dropped_total
 
         uptime = max(0.0, time.time() - self._started_at)
         return {
@@ -86,6 +150,12 @@ class ServiceTelemetry:
                 "adapter_calls_total": adapter_calls,
                 "adapter_errors_total": adapter_errors,
                 "auth_denied_total": auth_denied,
+            },
+            "tracing": {
+                "enabled": self._trace_enabled,
+                "buffer_size": self._trace_buffer_size,
+                "spans_total": trace_spans_total,
+                "dropped_total": trace_dropped_total,
             },
             "tools": tools,
             "adapters": adapters,
