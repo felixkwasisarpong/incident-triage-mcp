@@ -6,7 +6,7 @@ import time
 from collections import deque
 from dataclasses import dataclass
 from threading import Lock
-from typing import Any
+from typing import Any, Callable
 
 
 @dataclass
@@ -45,6 +45,7 @@ class ServiceTelemetry:
         *,
         trace_enabled: bool = True,
         trace_buffer_size: int = 200,
+        trace_event_sink: Callable[[dict[str, Any]], None] | None = None,
     ) -> None:
         self._service_name = service_name
         self._started_at = time.time()
@@ -54,8 +55,11 @@ class ServiceTelemetry:
         self._auth_denied_total = 0
         self._trace_enabled = bool(trace_enabled)
         self._trace_buffer_size = max(1, int(trace_buffer_size))
+        self._trace_event_sink = trace_event_sink
         self._trace_spans_total = 0
         self._trace_dropped_total = 0
+        self._trace_exported_total = 0
+        self._trace_export_errors_total = 0
         self._trace_events: deque[dict[str, Any]] = deque(maxlen=self._trace_buffer_size)
 
     def new_trace_id(self) -> str:
@@ -94,6 +98,8 @@ class ServiceTelemetry:
             "transport": transport,
             "error": error,
         }
+        should_export = False
+        sink: Callable[[dict[str, Any]], None] | None = None
         with self._lock:
             stats = self._tool_stats.setdefault(tool_name, _Stats())
             stats.observe(ok=ok, latency_ms=max(0.0, latency_ms))
@@ -102,6 +108,21 @@ class ServiceTelemetry:
                 if len(self._trace_events) >= self._trace_buffer_size:
                     self._trace_dropped_total += 1
                 self._trace_events.append(event)
+                if self._trace_event_sink is not None:
+                    should_export = True
+                    sink = self._trace_event_sink
+
+        if should_export and sink is not None:
+            export_ok = True
+            try:
+                sink(event)
+            except Exception:
+                export_ok = False
+            with self._lock:
+                if export_ok:
+                    self._trace_exported_total += 1
+                else:
+                    self._trace_export_errors_total += 1
 
     def observe_adapter(
         self,
@@ -139,6 +160,9 @@ class ServiceTelemetry:
             auth_denied = self._auth_denied_total
             trace_spans_total = self._trace_spans_total
             trace_dropped_total = self._trace_dropped_total
+            trace_exported_total = self._trace_exported_total
+            trace_export_errors_total = self._trace_export_errors_total
+            trace_sink_configured = self._trace_event_sink is not None
 
         uptime = max(0.0, time.time() - self._started_at)
         return {
@@ -154,8 +178,11 @@ class ServiceTelemetry:
             "tracing": {
                 "enabled": self._trace_enabled,
                 "buffer_size": self._trace_buffer_size,
+                "sink_configured": trace_sink_configured,
                 "spans_total": trace_spans_total,
                 "dropped_total": trace_dropped_total,
+                "exported_total": trace_exported_total,
+                "export_errors_total": trace_export_errors_total,
             },
             "tools": tools,
             "adapters": adapters,

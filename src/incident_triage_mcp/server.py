@@ -49,6 +49,171 @@ class _NoopIdempotencyStore:
         return None
 
 
+def _env_truthy(raw: str | None, *, default: bool = False) -> bool:
+    value = (raw or "").strip()
+    if not value:
+        return default
+    return value.lower() in {"1", "true", "yes", "on"}
+
+
+def _parse_float(raw: str | None, *, default: float) -> float:
+    value = (raw or "").strip()
+    if not value:
+        return default
+    try:
+        out = float(value)
+    except ValueError:
+        return default
+    return out if out > 0 else default
+
+
+def _parse_otlp_headers(raw: str | None) -> dict[str, str]:
+    value = (raw or "").strip()
+    if not value:
+        return {}
+
+    if value.startswith("{"):
+        try:
+            parsed = json.loads(value)
+        except json.JSONDecodeError:
+            return {}
+        if isinstance(parsed, dict):
+            out: dict[str, str] = {}
+            for k, v in parsed.items():
+                key = str(k).strip()
+                header_value = str(v).strip()
+                if key and header_value:
+                    out[key] = header_value
+            return out
+        return {}
+
+    out: dict[str, str] = {}
+    for part in value.split(","):
+        chunk = part.strip()
+        if not chunk or "=" not in chunk:
+            continue
+        key, header_value = chunk.split("=", 1)
+        key = key.strip()
+        header_value = header_value.strip()
+        if key and header_value:
+            out[key] = header_value
+    return out
+
+
+def _normalize_hex(value: str | None, width: int) -> str:
+    raw = (value or "").strip().lower()
+    clean = "".join(ch for ch in raw if ch in "0123456789abcdef")
+    if len(clean) < width:
+        clean = clean.rjust(width, "0")
+    return clean[:width]
+
+
+def _iso_to_dt(ts: str | None) -> datetime:
+    raw = (ts or "").strip()
+    if raw:
+        normalized = raw[:-1] + "+00:00" if raw.endswith("Z") else raw
+        try:
+            dt = datetime.fromisoformat(normalized)
+            return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
+        except ValueError:
+            pass
+    return datetime.now(timezone.utc)
+
+
+def _to_unix_nanos(dt: datetime) -> str:
+    return str(max(0, int(dt.timestamp() * 1_000_000_000)))
+
+
+def _otlp_attribute(key: str, value: Any) -> dict[str, Any]:
+    out: dict[str, Any] = {"key": key}
+    if isinstance(value, bool):
+        out["value"] = {"boolValue": value}
+    elif isinstance(value, int):
+        out["value"] = {"intValue": str(value)}
+    elif isinstance(value, float):
+        out["value"] = {"doubleValue": float(value)}
+    else:
+        out["value"] = {"stringValue": str(value)}
+    return out
+
+
+def _build_otlp_trace_payload(event: dict[str, Any], *, service_name: str) -> dict[str, Any]:
+    end_dt = _iso_to_dt(str(event.get("timestamp_iso") or ""))
+    latency_ms = max(0.0, float(event.get("latency_ms") or 0.0))
+    start_dt = end_dt - timedelta(milliseconds=latency_ms)
+    trace_id = _normalize_hex(str(event.get("trace_id") or ""), 32)
+    span_id = _normalize_hex(str(event.get("span_id") or ""), 16)
+    status_code = 1 if bool(event.get("ok", True)) else 2
+
+    attrs = [
+        _otlp_attribute("tool.name", event.get("tool_name", "")),
+        _otlp_attribute("tool.ok", bool(event.get("ok", True))),
+        _otlp_attribute("tool.latency_ms", latency_ms),
+    ]
+    request_id = (str(event.get("request_id") or "")).strip()
+    if request_id:
+        attrs.append(_otlp_attribute("request.id", request_id))
+    transport = (str(event.get("transport") or "")).strip()
+    if transport:
+        attrs.append(_otlp_attribute("transport", transport))
+    error = (str(event.get("error") or "")).strip()
+    if error:
+        attrs.append(_otlp_attribute("error.message", error))
+
+    return {
+        "resourceSpans": [
+            {
+                "resource": {
+                    "attributes": [
+                        _otlp_attribute("service.name", service_name),
+                    ]
+                },
+                "scopeSpans": [
+                    {
+                        "scope": {"name": "incident-triage-mcp", "version": "0.1"},
+                        "spans": [
+                            {
+                                "traceId": trace_id,
+                                "spanId": span_id,
+                                "name": str(event.get("tool_name") or "tool.call"),
+                                "kind": 2,  # SPAN_KIND_SERVER
+                                "startTimeUnixNano": _to_unix_nanos(start_dt),
+                                "endTimeUnixNano": _to_unix_nanos(end_dt),
+                                "attributes": attrs,
+                                "status": {"code": status_code},
+                            }
+                        ],
+                    }
+                ],
+            }
+        ]
+    }
+
+
+def _build_otlp_trace_sink(
+    *,
+    service_name: str,
+    endpoint: str,
+    timeout_seconds: float,
+    headers: dict[str, str] | None = None,
+):
+    request_headers = {"Content-Type": "application/json"}
+    if headers:
+        request_headers.update(headers)
+
+    def _sink(event: dict[str, Any]) -> None:
+        payload = _build_otlp_trace_payload(event, service_name=service_name)
+        response = requests.post(
+            endpoint,
+            json=payload,
+            headers=request_headers,
+            timeout=timeout_seconds,
+        )
+        response.raise_for_status()
+
+    return _sink
+
+
 try:
     CFG = load_config()
 except ConfigError as e:
@@ -63,17 +228,41 @@ _mcp_host = os.getenv("MCP_HOST", CFG.mcp_host or "127.0.0.1")
 _mcp_port = int(os.getenv("MCP_PORT", str(CFG.mcp_port or 8000)))
 mcp = FastMCP("Incident Triage MCP", json_response=True, host=_mcp_host, port=_mcp_port)
 audit = AuditLog()
-_trace_enabled_env = (os.getenv("MCP_TRACE_ENABLED") or "true").strip().lower()
-_trace_enabled = _trace_enabled_env not in {"0", "false", "no", "off"}
+_trace_enabled = _env_truthy(os.getenv("MCP_TRACE_ENABLED"), default=True)
 try:
     _trace_buffer_size = int((os.getenv("MCP_TRACE_BUFFER_SIZE") or "200").strip() or "200")
 except ValueError:
     _trace_buffer_size = 200
+_otlp_enabled = _env_truthy(os.getenv("MCP_OTLP_ENABLED"), default=False)
+_otlp_endpoint = (os.getenv("MCP_OTLP_ENDPOINT") or "").strip()
+_otlp_timeout_seconds = _parse_float(os.getenv("MCP_OTLP_TIMEOUT_SECONDS"), default=2.0)
+_otlp_headers = _parse_otlp_headers(os.getenv("MCP_OTLP_HEADERS"))
+_otlp_export_enabled = _otlp_enabled and bool(_otlp_endpoint)
+
+if _otlp_enabled and _otlp_endpoint:
+    _trace_event_sink = _build_otlp_trace_sink(
+        service_name="incident-triage-mcp",
+        endpoint=_otlp_endpoint,
+        timeout_seconds=_otlp_timeout_seconds,
+        headers=_otlp_headers,
+    )
+else:
+    _trace_event_sink = None
+
 telemetry = ServiceTelemetry(
     "incident-triage-mcp",
     trace_enabled=_trace_enabled,
     trace_buffer_size=_trace_buffer_size,
+    trace_event_sink=_trace_event_sink,
 )
+
+
+def _otlp_export_status() -> dict[str, Any]:
+    if not _otlp_enabled:
+        return {"enabled": False, "reason": "disabled"}
+    if not _otlp_endpoint:
+        return {"enabled": False, "reason": "missing_endpoint"}
+    return {"enabled": True, "endpoint": _otlp_endpoint}
 
 
 def _record_resilience_event(event: dict[str, Any]) -> None:
@@ -271,6 +460,8 @@ def _tool_request_meta(tool_event: str) -> tuple[dict[str, Any], str | None]:
 def _http_health_payload() -> dict[str, Any]:
     airflow_reason = _airflow_disabled_reason()
     health = telemetry.health()
+    health["tracing"] = telemetry.snapshot().get("tracing", {})
+    health["tracing"]["otlp_export"] = _otlp_export_status()
     health["transport"] = _active_transport()
     health["evidence_backend"] = _evidence_backend()
     health["providers"] = observability.provider_summary()
@@ -283,6 +474,7 @@ def _http_health_payload() -> dict[str, Any]:
 
 def _http_metrics_payload() -> dict[str, Any]:
     snapshot = telemetry.snapshot()
+    snapshot.setdefault("tracing", {})["otlp_export"] = _otlp_export_status()
     snapshot["transport"] = _active_transport()
     snapshot["evidence_backend"] = _evidence_backend()
     snapshot["providers"] = observability.provider_summary()
@@ -737,6 +929,7 @@ def mcp_traces_recent(limit: int = 25) -> dict:
         "correlation_id": corr,
         "traces": telemetry.recent_traces(limit),
         "tracing": telemetry.snapshot().get("tracing", {}),
+        "otlp_export": _otlp_export_status(),
     }
 
 

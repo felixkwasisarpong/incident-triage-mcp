@@ -148,6 +148,11 @@ MCP_PORT=3333
 # Internal tracing (in-memory span buffer)
 MCP_TRACE_ENABLED=true
 MCP_TRACE_BUFFER_SIZE=200
+# Optional OTLP/HTTP export (best-effort)
+MCP_OTLP_ENABLED=false
+MCP_OTLP_ENDPOINT=http://otel-collector:4318/v1/traces
+MCP_OTLP_TIMEOUT_SECONDS=2
+MCP_OTLP_HEADERS=Authorization=Bearer-token
 
 # HTTP auth boundary (applies only when MCP_TRANSPORT=streamable-http)
 MCP_HTTP_AUTH_MODE=none|api_key|jwt_hs256
@@ -395,6 +400,7 @@ The process will fail fast if prod requirements are not met (for example mock al
 - Deploy to staging first with the same providers/secrets model.
 - Keep `dry_run=true` for mutating tools in initial production canaries.
 - Alert on `mcp_metrics().totals.adapter_errors_total` and `mcp_metrics().totals.auth_denied_total`.
+- Alert on `mcp_metrics().tracing.export_errors_total` when OTLP export is enabled.
 
 ---
 
@@ -647,6 +653,7 @@ Typical demo sequence:
    - `mcp_metrics()`
    - `mcp_traces_recent(limit=25)`
    - HTTP checks (streamable-http): `GET /healthz`, `GET /metrics`, `GET /traces?limit=25`
+   - OTLP export status is included in `mcp_metrics().tracing.otlp_export`
 1) Trigger evidence collection:
    - `airflow_trigger_incident_dag(incident_id="INC-123", service="payments-api")`
 2) Wait for the Evidence Bundle:
