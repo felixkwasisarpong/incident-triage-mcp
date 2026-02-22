@@ -43,3 +43,19 @@ secretEnv: {}
 #   - name: EVIDENCE_BACKEND
 #     value: fs
 extraEnv: []
+
+# Extra volume mounts for shared artifacts/runbooks/etc.
+# Example:
+# extraVolumeMounts:
+#   - name: airflow-artifacts
+#     mountPath: /shared/artifacts
+#     readOnly: true
+extraVolumeMounts: []
+
+# Extra pod volumes corresponding to extraVolumeMounts.
+# Example:
+# extraVolumes:
+#   - name: airflow-artifacts
+#     persistentVolumeClaim:
+#       claimName: airflow-artifacts-pvc
+extraVolumes: []
