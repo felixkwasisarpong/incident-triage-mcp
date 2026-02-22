@@ -15,16 +15,16 @@ metadata:
     {{- include "incident-triage-mcp.labels" . | nindent 4 }}
     app.kubernetes.io/component: agent-job
 spec:
-  backoffLimit: {{ $job.backoffLimit }}
-  activeDeadlineSeconds: {{ $job.activeDeadlineSeconds }}
-  ttlSecondsAfterFinished: {{ $job.ttlSecondsAfterFinished }}
+  backoffLimit: {{ default 1 $job.backoffLimit }}
+  activeDeadlineSeconds: {{ default 600 $job.activeDeadlineSeconds }}
+  ttlSecondsAfterFinished: {{ default 3600 $job.ttlSecondsAfterFinished }}
   template:
     metadata:
       labels:
         {{- include "incident-triage-mcp.selectorLabels" . | nindent 8 }}
         app.kubernetes.io/component: agent-job
     spec:
-      restartPolicy: {{ $job.restartPolicy | quote }}
+      restartPolicy: {{ default "Never" $job.restartPolicy | quote }}
       containers:
         - name: incident-triage-agent
           image: "{{ $imageRepo }}:{{ $imageTag }}"

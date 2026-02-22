@@ -102,6 +102,7 @@ agentJob:
   # Use MCP_HTTP_API_KEY in secretEnv so the agent can authenticate to MCP without putting the key in args.
   env: {}
   secretEnv: {}
+
   extraEnv: []
 
   extraVolumeMounts: []
