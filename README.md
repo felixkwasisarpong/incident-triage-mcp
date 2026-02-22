@@ -145,6 +145,10 @@ MCP_TRANSPORT=stdio|streamable-http
 MCP_HOST=0.0.0.0
 MCP_PORT=3333
 
+# Internal tracing (in-memory span buffer)
+MCP_TRACE_ENABLED=true
+MCP_TRACE_BUFFER_SIZE=200
+
 # HTTP auth boundary (applies only when MCP_TRANSPORT=streamable-http)
 MCP_HTTP_AUTH_MODE=none|api_key|jwt_hs256
 MCP_HTTP_API_KEY=<required-when-mode-is-api_key>
@@ -383,6 +387,7 @@ The process will fail fast if prod requirements are not met (for example mock al
 
 - `mcp_health()`
 - `mcp_metrics()`
+- `mcp_traces_recent(limit=25)`
 - `jira_create_ticket(incident_id="INC-123", dry_run=true)` (safe action smoke check)
 
 4) Rollout recommendation
@@ -640,7 +645,8 @@ Typical demo sequence:
 0) Check MCP service health/metrics:
    - `mcp_health()`
    - `mcp_metrics()`
-   - HTTP checks (streamable-http): `GET /healthz`, `GET /metrics`
+   - `mcp_traces_recent(limit=25)`
+   - HTTP checks (streamable-http): `GET /healthz`, `GET /metrics`, `GET /traces?limit=25`
 1) Trigger evidence collection:
    - `airflow_trigger_incident_dag(incident_id="INC-123", service="payments-api")`
 2) Wait for the Evidence Bundle:
@@ -769,7 +775,7 @@ Useful overrides:
 - ✅ Built-in MCP observability tools (`mcp_health`, `mcp_metrics`)
 - ✅ Add a Helm chart + GitHub Actions to build/push multi-arch Docker images
 - Expand **RBAC + safe actions** with preconditions and approval tokens
-- Add richer **tracing** for MCP internals (OpenTelemetry/OTLP export)
+- ✅ Add richer **tracing** for MCP internals (`mcp_traces_recent`, `/traces` endpoint, in-memory span buffer)
 
 ---
 

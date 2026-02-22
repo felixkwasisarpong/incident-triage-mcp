@@ -28,6 +28,43 @@ class TestServiceTelemetry(unittest.TestCase):
         self.assertTrue(health["ok"])
         self.assertEqual(health["status"], "degraded")
 
+    def test_recent_traces_tracks_latest_and_drop_count(self) -> None:
+        telemetry = ServiceTelemetry("incident-triage-mcp", trace_enabled=True, trace_buffer_size=2)
+        telemetry.observe_tool_with_trace(
+            "ping",
+            ok=True,
+            latency_ms=1.0,
+            trace_id="trace-1",
+            span_id="span-1",
+            request_id="req-1",
+            transport="stdio",
+        )
+        telemetry.observe_tool_with_trace(
+            "ping",
+            ok=False,
+            latency_ms=2.0,
+            trace_id="trace-2",
+            span_id="span-2",
+            request_id="req-2",
+            transport="stdio",
+            error="RuntimeError: boom",
+        )
+        telemetry.observe_tool_with_trace(
+            "ping",
+            ok=True,
+            latency_ms=3.0,
+            trace_id="trace-3",
+            span_id="span-3",
+            request_id="req-3",
+            transport="stdio",
+        )
+
+        traces = telemetry.recent_traces(limit=5)
+        self.assertEqual(len(traces), 2)
+        self.assertEqual(traces[0]["trace_id"], "trace-3")
+        self.assertEqual(traces[1]["trace_id"], "trace-2")
+        self.assertEqual(telemetry.snapshot()["tracing"]["dropped_total"], 1)
+
 
 if __name__ == "__main__":
     unittest.main()
