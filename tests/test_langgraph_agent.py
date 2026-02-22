@@ -121,6 +121,42 @@ class TestLangGraphAgent(unittest.TestCase):
         self.assertIn("error", state)
         self.assertIn("boom", state["error"])
 
+    def test_run_agent_remote_uses_mcp_tool_calls(self) -> None:
+        from incident_triage_mcp.agents import langgraph_agent as agent
+
+        calls: list[dict[str, object]] = []
+
+        def _fake_call_tool(**kwargs):
+            calls.append(kwargs)
+            if kwargs["tool_name"] == "incident_triage_run":
+                return {"summary": {"status": "triage_started"}}
+            if kwargs["tool_name"] == "jira_create_ticket":
+                return {"created": True, "issue_key": "SCRUM-999"}
+            raise AssertionError(f"unexpected tool: {kwargs['tool_name']}")
+
+        with patch.object(agent, "_mcp_call_tool", side_effect=_fake_call_tool):
+            state = agent.run_agent(
+                incident_id="INC-500",
+                service="payments-api",
+                project_key="SCRUM",
+                create_ticket_live=True,
+                ticket_reason="Create live ticket for network mode test",
+                confirm_token="token-123",
+                mcp_url="http://mcp.example.test/mcp",
+                mcp_api_key="api-key-1",
+                mcp_client_id="agent-test",
+            )
+
+        self.assertNotIn("error", state)
+        self.assertEqual(state["result"]["summary"]["status"], "triage_started")
+        self.assertEqual(state["result"]["live_ticket"]["issue_key"], "SCRUM-999")
+        self.assertEqual(len(calls), 2)
+        self.assertEqual(calls[0]["tool_name"], "incident_triage_run")
+        self.assertEqual(calls[0]["mcp_url"], "http://mcp.example.test/mcp")
+        self.assertEqual(calls[0]["api_key"], "api-key-1")
+        self.assertEqual(calls[0]["client_id"], "agent-test")
+        self.assertEqual(calls[1]["tool_name"], "jira_create_ticket")
+
     def test_main_slack_live_flag_sets_dry_run_false(self) -> None:
         from incident_triage_mcp.agents import langgraph_agent as agent
 
@@ -155,6 +191,9 @@ class TestLangGraphAgent(unittest.TestCase):
             ticket_reason=None,
             confirm_token=None,
             idempotency_key=None,
+            mcp_url=None,
+            mcp_api_key=None,
+            mcp_client_id="incident-triage-agent",
         )
         print_mock.assert_called_once()
 
@@ -236,6 +275,9 @@ class TestLangGraphAgent(unittest.TestCase):
             ticket_reason="Create live ticket after triage",
             confirm_token="env-token",
             idempotency_key=None,
+            mcp_url=None,
+            mcp_api_key=None,
+            mcp_client_id="incident-triage-agent",
         )
 
     def test_main_sets_fs_artifact_env_defaults(self) -> None:
@@ -272,6 +314,34 @@ class TestLangGraphAgent(unittest.TestCase):
 
         self.assertEqual(code, 0)
         self.assertEqual(run_mock.call_args.kwargs["notify_provider"], "teams")
+
+    def test_main_remote_mcp_mode_skips_local_artifact_env_overrides(self) -> None:
+        from incident_triage_mcp.agents import langgraph_agent as agent
+
+        with patch.dict(os.environ, {}, clear=True), patch.object(
+            agent, "run_agent", return_value={"result": {"status": "ok"}}
+        ) as run_mock, patch("builtins.print"):
+            code = agent.main(
+                [
+                    "--incident-id",
+                    "INC-77",
+                    "--service",
+                    "payments-api",
+                    "--mcp-url",
+                    "http://localhost:3333/mcp",
+                    "--mcp-api-key",
+                    "secret-key",
+                ]
+            )
+            self.assertNotIn("EVIDENCE_BACKEND", os.environ)
+            self.assertNotIn("ARTIFACT_STORE", os.environ)
+            self.assertNotIn("EVIDENCE_DIR", os.environ)
+            self.assertNotIn("AIRFLOW_ARTIFACT_DIR", os.environ)
+
+        self.assertEqual(code, 0)
+        self.assertEqual(run_mock.call_args.kwargs["mcp_url"], "http://localhost:3333/mcp")
+        self.assertEqual(run_mock.call_args.kwargs["mcp_api_key"], "secret-key")
+        self.assertEqual(run_mock.call_args.kwargs["mcp_client_id"], "incident-triage-agent")
 
     def test_main_allows_s3_artifact_store(self) -> None:
         from incident_triage_mcp.agents import langgraph_agent as agent

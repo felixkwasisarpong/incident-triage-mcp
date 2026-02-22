@@ -1,10 +1,14 @@
 from __future__ import annotations
 
 import argparse
+import asyncio
 import importlib
 import json
 import os
 from typing import Any, TypedDict
+
+from mcp.client.session import ClientSession
+from mcp.client.streamable_http import streamablehttp_client
 
 from langgraph.graph import END, StateGraph
 
@@ -22,6 +26,9 @@ class IncidentGraphState(TypedDict, total=False):
     ticket_reason: str | None
     confirm_token: str | None
     idempotency_key: str | None
+    mcp_url: str | None
+    mcp_api_key: str | None
+    mcp_client_id: str | None
     live_ticket: dict[str, Any]
     result: dict[str, Any]
     error: str
@@ -32,19 +39,114 @@ def _load_server_module():
     return importlib.import_module("incident_triage_mcp.server")
 
 
-def _run_triage_node(state: IncidentGraphState) -> IncidentGraphState:
-    server = _load_server_module()
-    try:
-        result = server.incident_triage_run(
-            incident_id=state["incident_id"],
-            service=state["service"],
-            include_ticket=state.get("include_ticket", False),
-            project_key=state.get("project_key"),
-            notify_slack=state.get("notify_slack", False),
-            notify_provider=state.get("notify_provider"),
-            slack_channel=state.get("slack_channel"),
-            slack_dry_run=state.get("slack_dry_run", True),
+def _mcp_headers(api_key: str | None = None, client_id: str | None = None) -> dict[str, str] | None:
+    headers: dict[str, str] = {}
+    if api_key:
+        headers["x-api-key"] = api_key
+    if client_id:
+        headers["x-client-id"] = client_id
+    return headers or None
+
+
+def _extract_tool_result_payload(result: Any) -> dict[str, Any]:
+    structured = getattr(result, "structuredContent", None)
+    if isinstance(structured, dict):
+        if getattr(result, "isError", False):
+            raise RuntimeError(json.dumps(structured, ensure_ascii=False))
+        return structured
+
+    contents = getattr(result, "content", None) or []
+    text_chunks: list[str] = []
+    for item in contents:
+        if getattr(item, "type", None) == "text":
+            text = getattr(item, "text", "")
+            if isinstance(text, str) and text:
+                text_chunks.append(text)
+    if text_chunks:
+        joined = "\n".join(text_chunks)
+        try:
+            parsed = json.loads(joined)
+        except json.JSONDecodeError:
+            parsed = None
+        if isinstance(parsed, dict):
+            if getattr(result, "isError", False):
+                raise RuntimeError(json.dumps(parsed, ensure_ascii=False))
+            return parsed
+        if getattr(result, "isError", False):
+            raise RuntimeError(joined)
+        return {"text": joined}
+
+    if getattr(result, "isError", False):
+        raise RuntimeError("Remote MCP tool call returned an error with no payload.")
+    raise RuntimeError("Remote MCP tool call returned an unexpected payload format.")
+
+
+async def _mcp_call_tool_async(
+    *,
+    mcp_url: str,
+    tool_name: str,
+    arguments: dict[str, Any],
+    api_key: str | None = None,
+    client_id: str | None = None,
+) -> dict[str, Any]:
+    headers = _mcp_headers(api_key=api_key, client_id=client_id)
+    async with streamablehttp_client(mcp_url, headers=headers) as (
+        read_stream,
+        write_stream,
+        _get_session_id,
+    ):
+        async with ClientSession(read_stream, write_stream) as session:
+            await session.initialize()
+            result = await session.call_tool(tool_name, arguments=arguments)
+            return _extract_tool_result_payload(result)
+
+
+def _mcp_call_tool(
+    *,
+    mcp_url: str,
+    tool_name: str,
+    arguments: dict[str, Any],
+    api_key: str | None = None,
+    client_id: str | None = None,
+) -> dict[str, Any]:
+    return asyncio.run(
+        _mcp_call_tool_async(
+            mcp_url=mcp_url,
+            tool_name=tool_name,
+            arguments=arguments,
+            api_key=api_key,
+            client_id=client_id,
         )
+    )
+
+
+def _remote_enabled(state: IncidentGraphState) -> bool:
+    return bool((state.get("mcp_url") or "").strip())
+
+
+def _run_triage_node(state: IncidentGraphState) -> IncidentGraphState:
+    try:
+        kwargs = {
+            "incident_id": state["incident_id"],
+            "service": state["service"],
+            "include_ticket": state.get("include_ticket", False),
+            "project_key": state.get("project_key"),
+            "notify_slack": state.get("notify_slack", False),
+            "notify_provider": state.get("notify_provider"),
+            "slack_channel": state.get("slack_channel"),
+            "slack_dry_run": state.get("slack_dry_run", True),
+        }
+        if _remote_enabled(state):
+            result = _mcp_call_tool(
+                mcp_url=(state.get("mcp_url") or "").strip(),
+                tool_name="incident_triage_run",
+                arguments=kwargs,
+                api_key=state.get("mcp_api_key"),
+                client_id=state.get("mcp_client_id"),
+            )
+        else:
+            server = _load_server_module()
+            result = server.incident_triage_run(**kwargs)
         return {"result": result}
     except Exception as exc:  # pragma: no cover - covered via run_agent tests
         return {"error": str(exc)}
@@ -64,16 +166,26 @@ def _default_live_idempotency_key(state: IncidentGraphState) -> str:
 
 
 def _create_live_ticket_node(state: IncidentGraphState) -> IncidentGraphState:
-    server = _load_server_module()
     try:
-        ticket = server.jira_create_ticket(
-            incident_id=state["incident_id"],
-            project_key=state.get("project_key"),
-            dry_run=False,
-            reason=state.get("ticket_reason"),
-            confirm_token=state.get("confirm_token"),
-            idempotency_key=state.get("idempotency_key") or _default_live_idempotency_key(state),
-        )
+        kwargs = {
+            "incident_id": state["incident_id"],
+            "project_key": state.get("project_key"),
+            "dry_run": False,
+            "reason": state.get("ticket_reason"),
+            "confirm_token": state.get("confirm_token"),
+            "idempotency_key": state.get("idempotency_key") or _default_live_idempotency_key(state),
+        }
+        if _remote_enabled(state):
+            ticket = _mcp_call_tool(
+                mcp_url=(state.get("mcp_url") or "").strip(),
+                tool_name="jira_create_ticket",
+                arguments=kwargs,
+                api_key=state.get("mcp_api_key"),
+                client_id=state.get("mcp_client_id"),
+            )
+        else:
+            server = _load_server_module()
+            ticket = server.jira_create_ticket(**kwargs)
         result = state.get("result")
         if isinstance(result, dict):
             merged = dict(result)
@@ -133,6 +245,9 @@ def run_agent(
     ticket_reason: str | None = None,
     confirm_token: str | None = None,
     idempotency_key: str | None = None,
+    mcp_url: str | None = None,
+    mcp_api_key: str | None = None,
+    mcp_client_id: str | None = None,
 ) -> IncidentGraphState:
     app = build_agent()
     initial_state: IncidentGraphState = {
@@ -148,6 +263,9 @@ def run_agent(
         "ticket_reason": ticket_reason,
         "confirm_token": confirm_token,
         "idempotency_key": idempotency_key,
+        "mcp_url": mcp_url,
+        "mcp_api_key": mcp_api_key,
+        "mcp_client_id": mcp_client_id,
     }
     return app.invoke(initial_state)
 
@@ -200,6 +318,19 @@ def _build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Disable Slack dry-run mode (equivalent to slack_dry_run=false).",
     )
+    parser.add_argument(
+        "--mcp-url",
+        help="Remote MCP streamable-http URL (if set, agent calls MCP over network instead of importing local server).",
+    )
+    parser.add_argument(
+        "--mcp-api-key",
+        help="Optional API key for remote MCP HTTP auth (sent as x-api-key).",
+    )
+    parser.add_argument(
+        "--mcp-client-id",
+        default="incident-triage-agent",
+        help="Optional x-client-id header for remote MCP HTTP auth/audit (default: incident-triage-agent).",
+    )
     parser.add_argument("--compact", action="store_true", help="Print compact JSON output")
     return parser
 
@@ -214,12 +345,19 @@ def main(argv: list[str] | None = None) -> int:
     if args.create_ticket_live and not confirm_token:
         parser.error("--confirm-token (or CONFIRM_TOKEN env) is required when --create-ticket-live is set.")
 
-    # Force deterministic local defaults for CLI usage.
-    os.environ["EVIDENCE_BACKEND"] = args.artifact_store
-    os.environ["ARTIFACT_STORE"] = args.artifact_store
-    if args.artifact_store == "fs":
-        os.environ["EVIDENCE_DIR"] = args.artifact_dir
-        os.environ["AIRFLOW_ARTIFACT_DIR"] = args.artifact_dir
+    mcp_api_key = args.mcp_api_key or os.getenv("MCP_HTTP_API_KEY")
+    if args.mcp_url:
+        mcp_url = args.mcp_url.strip()
+        if not mcp_url:
+            parser.error("--mcp-url cannot be empty.")
+    else:
+        mcp_url = None
+        # Force deterministic local defaults for CLI usage only in in-process mode.
+        os.environ["EVIDENCE_BACKEND"] = args.artifact_store
+        os.environ["ARTIFACT_STORE"] = args.artifact_store
+        if args.artifact_store == "fs":
+            os.environ["EVIDENCE_DIR"] = args.artifact_dir
+            os.environ["AIRFLOW_ARTIFACT_DIR"] = args.artifact_dir
 
     state = run_agent(
         incident_id=args.incident_id,
@@ -234,6 +372,9 @@ def main(argv: list[str] | None = None) -> int:
         ticket_reason=args.ticket_reason,
         confirm_token=confirm_token,
         idempotency_key=args.idempotency_key,
+        mcp_url=mcp_url,
+        mcp_api_key=mcp_api_key,
+        mcp_client_id=args.mcp_client_id,
     )
 
     payload = {
