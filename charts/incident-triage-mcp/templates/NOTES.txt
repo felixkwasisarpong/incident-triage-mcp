@@ -6,3 +6,13 @@
 {{- else }}
   kubectl get service {{ include "incident-triage-mcp.fullname" . }} --namespace {{ .Release.Namespace }}
 {{- end }}
+
+{{- if .Values.agentJob.enabled }}
+
+2. Inspect the agent Job run:
+  kubectl get job {{ include "incident-triage-mcp.fullname" . }}-agent --namespace {{ .Release.Namespace }}
+  kubectl logs job/{{ include "incident-triage-mcp.fullname" . }}-agent --namespace {{ .Release.Namespace }}
+
+  # Re-run manually (delete the completed job, then helm upgrade again)
+  kubectl delete job {{ include "incident-triage-mcp.fullname" . }}-agent --namespace {{ .Release.Namespace }} --ignore-not-found
+{{- end }}

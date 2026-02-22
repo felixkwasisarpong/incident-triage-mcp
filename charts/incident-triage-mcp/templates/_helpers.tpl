@@ -27,3 +27,12 @@ app.kubernetes.io/managed-by: {{ .Release.Service }}
 app.kubernetes.io/name: {{ include "incident-triage-mcp.name" . }}
 app.kubernetes.io/instance: {{ .Release.Name }}
 {{- end -}}
+
+{{- define "incident-triage-mcp.agentJobSecretName" -}}
+{{ include "incident-triage-mcp.fullname" . }}-agent-job-env
+{{- end -}}
+
+{{- define "incident-triage-mcp.agentJobMcpUrl" -}}
+{{- $svcPort := .Values.service.port | toString -}}
+{{- printf "http://%s.%s.svc.cluster.local:%s/mcp" (include "incident-triage-mcp.fullname" .) .Release.Namespace $svcPort -}}
+{{- end -}}
