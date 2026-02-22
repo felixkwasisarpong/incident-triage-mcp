@@ -1,0 +1,80 @@
+{{- if .Values.agentJob.enabled }}
+{{- $job := .Values.agentJob -}}
+{{- $incidentID := required "agentJob.incidentId is required when agentJob.enabled=true" $job.incidentId -}}
+{{- $serviceName := required "agentJob.service is required when agentJob.enabled=true" $job.service -}}
+{{- $baseTag := default .Chart.AppVersion .Values.image.tag -}}
+{{- $imageRepo := default .Values.image.repository $job.image.repository -}}
+{{- $imageTag := default $baseTag $job.image.tag -}}
+{{- $imagePullPolicy := default .Values.image.pullPolicy $job.image.pullPolicy -}}
+{{- $mcpUrl := default (include "incident-triage-mcp.agentJobMcpUrl" .) $job.mcpUrl -}}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "incident-triage-mcp.fullname" . }}-agent
+  labels:
+    {{- include "incident-triage-mcp.labels" . | nindent 4 }}
+    app.kubernetes.io/component: agent-job
+spec:
+  backoffLimit: {{ $job.backoffLimit }}
+  activeDeadlineSeconds: {{ $job.activeDeadlineSeconds }}
+  ttlSecondsAfterFinished: {{ $job.ttlSecondsAfterFinished }}
+  template:
+    metadata:
+      labels:
+        {{- include "incident-triage-mcp.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: agent-job
+    spec:
+      restartPolicy: {{ $job.restartPolicy | quote }}
+      containers:
+        - name: incident-triage-agent
+          image: "{{ $imageRepo }}:{{ $imageTag }}"
+          imagePullPolicy: {{ $imagePullPolicy }}
+          args:
+            - incident-triage-agent
+            - --incident-id
+            - {{ $incidentID | quote }}
+            - --service
+            - {{ $serviceName | quote }}
+            - --mcp-url
+            - {{ $mcpUrl | quote }}
+            {{- if $job.includeTicket }}
+            - --include-ticket
+            {{- end }}
+            {{- if $job.compact }}
+            - --compact
+            {{- end }}
+            {{- range $arg := $job.extraArgs }}
+            - {{ $arg | quote }}
+            {{- end }}
+          {{- if or $job.env $job.secretEnv $job.extraEnv }}
+          env:
+            {{- range $name, $value := $job.env }}
+            - name: {{ $name }}
+              value: {{ $value | quote }}
+            {{- end }}
+            {{- if $job.secretEnv }}
+            {{- range $name, $_ := $job.secretEnv }}
+            - name: {{ $name }}
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "incident-triage-mcp.agentJobSecretName" $ }}
+                  key: {{ $name }}
+            {{- end }}
+            {{- end }}
+            {{- with $job.extraEnv }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          {{- end }}
+          {{- with $job.extraVolumeMounts }}
+          volumeMounts:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with $job.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+      {{- with $job.extraVolumes }}
+      volumes:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+{{- end }}

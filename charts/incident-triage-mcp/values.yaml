@@ -59,3 +59,50 @@ extraVolumeMounts: []
 #     persistentVolumeClaim:
 #       claimName: airflow-artifacts-pvc
 extraVolumes: []
+
+# Optional one-shot LangGraph agent Job (runs `incident-triage-agent` against this MCP service).
+# This is useful for prod-sim/manual incident runs and for event-driven dispatchers that create Jobs.
+agentJob:
+  enabled: false
+
+  # Job lifecycle controls
+  restartPolicy: Never
+  backoffLimit: 1
+  activeDeadlineSeconds: 600
+  ttlSecondsAfterFinished: 3600
+
+  # Agent image defaults to the chart image when left blank.
+  image:
+    repository: ""
+    tag: ""
+    pullPolicy: ""
+
+  resources: {}
+
+  # Required when enabled (unless overridden via extraArgs):
+  incidentId: ""
+  service: ""
+
+  # Optional agent flags
+  includeTicket: false
+  compact: true
+
+  # Remote MCP target. Defaults to this chart's service (/mcp) when blank.
+  mcpUrl: ""
+
+  # Additional CLI flags appended to the generated args list.
+  # Example:
+  # extraArgs:
+  #   - --notify-slack
+  #   - --notify-provider
+  #   - teams
+  extraArgs: []
+
+  # Agent runtime env/secrets.
+  # Use MCP_HTTP_API_KEY in secretEnv so the agent can authenticate to MCP without putting the key in args.
+  env: {}
+  secretEnv: {}
+  extraEnv: []
+
+  extraVolumeMounts: []
+  extraVolumes: []
