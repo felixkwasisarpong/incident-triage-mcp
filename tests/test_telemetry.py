@@ -65,6 +65,55 @@ class TestServiceTelemetry(unittest.TestCase):
         self.assertEqual(traces[1]["trace_id"], "trace-2")
         self.assertEqual(telemetry.snapshot()["tracing"]["dropped_total"], 1)
 
+    def test_trace_sink_updates_export_counters(self) -> None:
+        exported: list[dict[str, object]] = []
+
+        def sink(event: dict[str, object]) -> None:
+            exported.append(event)
+
+        telemetry = ServiceTelemetry(
+            "incident-triage-mcp",
+            trace_enabled=True,
+            trace_buffer_size=10,
+            trace_event_sink=sink,
+        )
+        telemetry.observe_tool_with_trace(
+            "ping",
+            ok=True,
+            latency_ms=1.5,
+            trace_id="trace-a",
+            span_id="span-a",
+        )
+
+        snap = telemetry.snapshot()
+        self.assertEqual(len(exported), 1)
+        self.assertTrue(snap["tracing"]["sink_configured"])
+        self.assertEqual(snap["tracing"]["exported_total"], 1)
+        self.assertEqual(snap["tracing"]["export_errors_total"], 0)
+
+    def test_trace_sink_failures_are_counted(self) -> None:
+        def sink(_event: dict[str, object]) -> None:
+            raise RuntimeError("collector unavailable")
+
+        telemetry = ServiceTelemetry(
+            "incident-triage-mcp",
+            trace_enabled=True,
+            trace_buffer_size=10,
+            trace_event_sink=sink,
+        )
+        telemetry.observe_tool_with_trace(
+            "ping",
+            ok=False,
+            latency_ms=3.5,
+            trace_id="trace-b",
+            span_id="span-b",
+            error="RuntimeError: boom",
+        )
+
+        snap = telemetry.snapshot()
+        self.assertEqual(snap["tracing"]["exported_total"], 0)
+        self.assertEqual(snap["tracing"]["export_errors_total"], 1)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -178,6 +178,51 @@ class TestServerTools(unittest.TestCase):
             self.assertIn("span_id", row)
             self.assertIn("ok", row)
 
+    def test_build_otlp_trace_payload_shape(self) -> None:
+        event = {
+            "timestamp_iso": "2026-02-22T12:00:00+00:00",
+            "tool_name": "ping",
+            "ok": True,
+            "latency_ms": 12.5,
+            "trace_id": "a" * 32,
+            "span_id": "b" * 16,
+            "request_id": "req-1",
+            "transport": "stdio",
+        }
+        payload = self.server._build_otlp_trace_payload(event, service_name="incident-triage-mcp")
+        spans = payload["resourceSpans"][0]["scopeSpans"][0]["spans"]
+        self.assertEqual(len(spans), 1)
+        span = spans[0]
+        self.assertEqual(span["traceId"], "a" * 32)
+        self.assertEqual(span["spanId"], "b" * 16)
+        self.assertEqual(span["name"], "ping")
+        self.assertEqual(span["status"]["code"], 1)
+
+    def test_otlp_trace_sink_posts_payload(self) -> None:
+        event = {
+            "timestamp_iso": "2026-02-22T12:00:00+00:00",
+            "tool_name": "ping",
+            "ok": True,
+            "latency_ms": 4.0,
+            "trace_id": "a" * 32,
+            "span_id": "b" * 16,
+        }
+        response = Mock()
+        response.raise_for_status.return_value = None
+        sink = self.server._build_otlp_trace_sink(
+            service_name="incident-triage-mcp",
+            endpoint="http://collector:4318/v1/traces",
+            timeout_seconds=1.25,
+            headers={"Authorization": "Bearer test"},
+        )
+        with patch.object(self.server.requests, "post", return_value=response) as post_mock:
+            sink(event)
+
+        post_mock.assert_called_once()
+        self.assertEqual(post_mock.call_args.kwargs["timeout"], 1.25)
+        self.assertEqual(post_mock.call_args.kwargs["headers"]["Authorization"], "Bearer test")
+        self.assertIn("resourceSpans", post_mock.call_args.kwargs["json"])
+
     def test_http_health_payload_shape(self) -> None:
         out = self.server._http_health_payload()
         self.assertTrue(out["ok"])
