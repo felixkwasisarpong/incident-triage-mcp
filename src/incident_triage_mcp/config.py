@@ -20,6 +20,18 @@ def _require(name: str) -> str:
     return v
 
 
+def _env_bool(name: str, default: bool = False) -> bool:
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    value = raw.strip().lower()
+    if value in {"1", "true", "yes", "on"}:
+        return True
+    if value in {"0", "false", "no", "off", ""}:
+        return False
+    raise ConfigError(f"{name} must be a boolean value (true/false)")
+
+
 @dataclass(frozen=True)
 class AppConfig:
     # Deployment profile
@@ -38,6 +50,7 @@ class AppConfig:
     evidence_backend: str
     evidence_dir: str
     artifact_store: str
+    bundle_only_mode: bool
     s3_endpoint_url: Optional[str]
     s3_bucket: Optional[str]
     s3_region: str
@@ -92,6 +105,7 @@ def load_config() -> AppConfig:
         evidence_backend=evidence_backend,
         evidence_dir=_env("EVIDENCE_DIR", "./evidence") or "./evidence",
         artifact_store=artifact_store,
+        bundle_only_mode=_env_bool("BUNDLE_ONLY_MODE", False),
         s3_endpoint_url=_env("S3_ENDPOINT_URL"),
         s3_bucket=_env("S3_BUCKET"),
         s3_region=_env("S3_REGION", "us-east-1") or "us-east-1",
@@ -188,22 +202,23 @@ def load_config() -> AppConfig:
             cfg.logs_provider,
             cfg.traces_provider,
         }
-        provider_requirements: dict[str, list[str]] = {
-            "datadog": ["DATADOG_API_KEY", "DATADOG_APP_KEY"],
-            "prometheus": ["PROMETHEUS_BASE_URL"],
-            "pagerduty": ["PAGERDUTY_API_TOKEN"],
-            "opsgenie": ["OPSGENIE_API_KEY"],
-            "elk": ["ELASTICSEARCH_BASE_URL"],
-        }
-        for provider, env_vars in provider_requirements.items():
-            if provider not in selected_providers:
-                continue
-            missing = [name for name in env_vars if not _env(name)]
-            if missing:
-                raise ConfigError(
-                    f"Missing required env vars for {provider} provider in {cfg.deployment_profile} profile: "
-                    + ", ".join(missing)
-                )
+        if not cfg.bundle_only_mode:
+            provider_requirements: dict[str, list[str]] = {
+                "datadog": ["DATADOG_API_KEY", "DATADOG_APP_KEY"],
+                "prometheus": ["PROMETHEUS_BASE_URL"],
+                "pagerduty": ["PAGERDUTY_API_TOKEN"],
+                "opsgenie": ["OPSGENIE_API_KEY"],
+                "elk": ["ELASTICSEARCH_BASE_URL"],
+            }
+            for provider, env_vars in provider_requirements.items():
+                if provider not in selected_providers:
+                    continue
+                missing = [name for name in env_vars if not _env(name)]
+                if missing:
+                    raise ConfigError(
+                        f"Missing required env vars for {provider} provider in {cfg.deployment_profile} profile: "
+                        + ", ".join(missing)
+                    )
 
         ticket_provider_requirements: dict[str, list[str]] = {
             "cloud": ["JIRA_BASE_URL", "JIRA_EMAIL", "JIRA_API_TOKEN"],
@@ -225,7 +240,9 @@ def load_config() -> AppConfig:
     if cfg.deployment_profile == "prod":
         if cfg.audit_mode != "stdout":
             raise ConfigError("AUDIT_MODE must be 'stdout' in DEPLOYMENT_PROFILE=prod")
-        if cfg.alerts_provider == "mock" or cfg.metrics_provider == "mock":
+        if (not cfg.bundle_only_mode) and (
+            cfg.alerts_provider == "mock" or cfg.metrics_provider == "mock"
+        ):
             raise ConfigError(
                 "ALERTS_PROVIDER and METRICS_PROVIDER cannot be 'mock' in DEPLOYMENT_PROFILE=prod"
             )

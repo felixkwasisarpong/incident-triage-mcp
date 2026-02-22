@@ -21,6 +21,7 @@ class TestAdapterScaffold(unittest.TestCase):
         self.assertEqual(cfg.metrics_provider, "mock")
         self.assertEqual(cfg.logs_provider, "mock")
         self.assertEqual(cfg.traces_provider, "mock")
+        self.assertFalse(cfg.bundle_only_mode)
 
     def test_config_rejects_invalid_deployment_profile(self) -> None:
         with patch.dict(os.environ, {"DEPLOYMENT_PROFILE": "qa"}, clear=True):
@@ -135,6 +136,58 @@ class TestAdapterScaffold(unittest.TestCase):
                 "METRICS_PROVIDER": "mock",
                 "IDEMPOTENCY_BACKEND": "redis",
                 "IDEMPOTENCY_REDIS_URL": "redis://localhost:6379/0",
+            },
+            clear=True,
+        ):
+            with self.assertRaises(ConfigError):
+                load_config()
+
+    def test_bundle_only_mode_allows_prod_with_mock_alerts_metrics(self) -> None:
+        with patch.dict(
+            os.environ,
+            {
+                "DEPLOYMENT_PROFILE": "prod",
+                "MCP_TRANSPORT": "stdio",
+                "AUDIT_MODE": "stdout",
+                "BUNDLE_ONLY_MODE": "true",
+                "ALERTS_PROVIDER": "mock",
+                "METRICS_PROVIDER": "mock",
+                "IDEMPOTENCY_BACKEND": "redis",
+                "IDEMPOTENCY_REDIS_URL": "redis://localhost:6379/0",
+            },
+            clear=True,
+        ):
+            cfg = load_config()
+
+        self.assertEqual(cfg.deployment_profile, "prod")
+        self.assertTrue(cfg.bundle_only_mode)
+        self.assertEqual(cfg.alerts_provider, "mock")
+        self.assertEqual(cfg.metrics_provider, "mock")
+
+    def test_bundle_only_mode_skips_staging_provider_secret_requirements(self) -> None:
+        with patch.dict(
+            os.environ,
+            {
+                "DEPLOYMENT_PROFILE": "staging",
+                "MCP_TRANSPORT": "stdio",
+                "BUNDLE_ONLY_MODE": "true",
+                "ALERTS_PROVIDER": "datadog",
+                "METRICS_PROVIDER": "datadog",
+            },
+            clear=True,
+        ):
+            cfg = load_config()
+
+        self.assertEqual(cfg.deployment_profile, "staging")
+        self.assertTrue(cfg.bundle_only_mode)
+        self.assertEqual(cfg.alerts_provider, "datadog")
+        self.assertEqual(cfg.metrics_provider, "datadog")
+
+    def test_bundle_only_mode_rejects_invalid_boolean_value(self) -> None:
+        with patch.dict(
+            os.environ,
+            {
+                "BUNDLE_ONLY_MODE": "maybe",
             },
             clear=True,
         ):
