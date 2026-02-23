@@ -511,6 +511,7 @@ class TestServerTools(unittest.TestCase):
         self.assertIs(run_mock.call_args.kwargs["alerts_fetch_active"], self.server.alerts_fetch_active)
         self.assertIs(run_mock.call_args.kwargs["airflow_trigger_incident_dag"], self.server.airflow_trigger_incident_dag)
         self.assertIs(run_mock.call_args.kwargs["airflow_get_incident_artifact"], self.server.airflow_get_incident_artifact)
+        self.assertIs(run_mock.call_args.kwargs["evidence_wait_for_bundle"], self.server.evidence_wait_for_bundle)
         self.assertIsNone(run_mock.call_args.kwargs["tickets_create"])
 
     def test_incident_triage_run_with_ticket_hook(self) -> None:
