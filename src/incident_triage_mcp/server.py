@@ -770,6 +770,7 @@ def incident_triage_run(
         alerts_fetch_active=alerts_fetch_active,
         airflow_trigger_incident_dag=airflow_trigger_incident_dag,
         airflow_get_incident_artifact=airflow_get_incident_artifact,
+        evidence_wait_for_bundle=evidence_wait_for_bundle,
         tickets_create=tickets_create,
     )
 

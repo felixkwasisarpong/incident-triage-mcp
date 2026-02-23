@@ -9,6 +9,9 @@ def triage_incident_run(
     alerts_fetch_active,
     airflow_trigger_incident_dag,
     airflow_get_incident_artifact,
+    evidence_wait_for_bundle=None,
+    evidence_wait_timeout_seconds: int = 30,
+    evidence_wait_poll_seconds: int = 2,
     tickets_create=None,
 ) -> Dict[str, Any]:
     """
@@ -20,8 +23,24 @@ def triage_incident_run(
     # 2) Kick off Airflow evidence pipeline
     dag_run = airflow_trigger_incident_dag(incident_id=incident_id, service=service)
 
-    # 3) Pull artifact (may not exist immediately; caller can re-call)
+    # 3) Pull artifact (may not exist immediately)
     artifact = airflow_get_incident_artifact(incident_id=incident_id)
+    trigger_failed = isinstance(dag_run, dict) and (
+        dag_run.get("enabled") is False or bool(dag_run.get("error"))
+    )
+    if (
+        evidence_wait_for_bundle is not None
+        and not trigger_failed
+        and isinstance(artifact, dict)
+        and not artifact.get("found", False)
+    ):
+        waited = evidence_wait_for_bundle(
+            incident_id=incident_id,
+            timeout_seconds=evidence_wait_timeout_seconds,
+            poll_seconds=evidence_wait_poll_seconds,
+        )
+        if isinstance(waited, dict):
+            artifact = waited
 
     # 4) Simple summary (keep deterministic; don’t “invent”)
     summary = {
@@ -54,4 +73,3 @@ def triage_incident_run(
         out["ticket"] = ticket
 
     return out
-
