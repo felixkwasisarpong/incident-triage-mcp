@@ -594,17 +594,23 @@ Deployment profile smoke checks:
 
 ## Automated Releases
 
-This repo supports automated tag-based release publishing for both PyPI and GHCR.
+This repo supports automated tag-based release publishing for PyPI, GHCR, and Docker Hub.
 
 Release workflow:
 - Trigger: push a Git tag like `v0.2.0`
 - Publishes:
   - Python package to PyPI
-  - Multi-arch Docker image (`linux/amd64`, `linux/arm64`) to `ghcr.io/<owner>/incident-triage-mcp`
+  - Multi-arch Docker image (`linux/amd64`, `linux/arm64`) to:
+    - `ghcr.io/<owner>/incident-triage-mcp`
+    - `docker.io/<dockerhub-user>/incident-triage-mcp`
+  - Docker image tags: `X.Y.Z`, `X.Y`, `latest`
+  - Docker Hub repository Overview (synced from `README_PYPI.md`)
   - GitHub Release with generated notes
 
-Required repository secret:
+Required repository secrets:
 - `PYPI_API_TOKEN` (PyPI API token with publish permission)
+- `DOCKERHUB_USERNAME` (Docker Hub username / namespace)
+- `DOCKERHUB_TOKEN` (Docker Hub access token with write permission)
 
 Release command:
 
@@ -617,6 +623,7 @@ git push origin v0.2.0
 Notes:
 - The workflow validates that tag `vX.Y.Z` matches `project.version` in `pyproject.toml`.
 - GHCR publish uses the built-in `GITHUB_TOKEN`.
+- Docker Hub publish + Overview sync use `DOCKERHUB_USERNAME` / `DOCKERHUB_TOKEN`.
 
 ---
 
@@ -642,6 +649,8 @@ Notes:
 - Server name is `io.github.felixkwasisarpong/incident-triage-mcp`.
 - PyPI verification marker is embedded in this README (`mcp-name: ...`).
 - OCI verification is provided via Docker image label (`io.modelcontextprotocol.server.name`).
+- Catalog icon asset (for Docker MCP registry `server.yaml`) is checked in at `docs/assets/icon.png`.
+- Raw icon URL: `https://raw.githubusercontent.com/felixkwasisarpong/incident-triage-mcp/main/docs/assets/icon.png`
 - Use the matching binary asset for your OS/arch from:
   `https://github.com/modelcontextprotocol/registry/releases/latest`
 
