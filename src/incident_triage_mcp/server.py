@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import argparse
+import importlib.metadata
 import json
 import os
 import time
@@ -1738,7 +1740,23 @@ _register_http_health_routes()
 
 
 def main() -> None:
-    transport = os.getenv("MCP_TRANSPORT", CFG.mcp_transport or "stdio")
+    parser = argparse.ArgumentParser(
+        prog="incident-triage-mcp",
+        description="Run the Incident Triage MCP server.",
+    )
+    parser.add_argument(
+        "--transport",
+        choices=("stdio", "streamable-http"),
+        help="Override MCP transport (defaults to MCP_TRANSPORT env var or config).",
+    )
+    try:
+        pkg_version = importlib.metadata.version("incident-triage-mcp")
+    except importlib.metadata.PackageNotFoundError:
+        pkg_version = "unknown"
+    parser.add_argument("--version", action="version", version=f"%(prog)s {pkg_version}")
+
+    args = parser.parse_args()
+    transport = args.transport or os.getenv("MCP_TRANSPORT", CFG.mcp_transport or "stdio")
     mcp.run(transport=transport)
 
 
