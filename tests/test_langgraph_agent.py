@@ -4,7 +4,7 @@ import os
 import sys
 import unittest
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -156,6 +156,47 @@ class TestLangGraphAgent(unittest.TestCase):
         self.assertEqual(calls[0]["api_key"], "api-key-1")
         self.assertEqual(calls[0]["client_id"], "agent-test")
         self.assertEqual(calls[1]["tool_name"], "jira_create_ticket")
+
+    def test_run_agent_remote_surfaces_inner_exceptiongroup_error(self) -> None:
+        from incident_triage_mcp.agents import langgraph_agent as agent
+
+        exc = ExceptionGroup("unhandled errors in a TaskGroup", [RuntimeError("stream closed")])
+        with patch.object(agent, "_mcp_call_tool", side_effect=exc):
+            state = agent.run_agent(
+                incident_id="INC-501",
+                service="payments-api",
+                mcp_url="http://mcp.example.test/mcp",
+            )
+
+        self.assertIn("error", state)
+        self.assertIn("TaskGroup", state["error"])
+        self.assertIn("stream closed", state["error"])
+
+    def test_mcp_call_tool_retries_transient_taskgroup_error_once(self) -> None:
+        from incident_triage_mcp.agents import langgraph_agent as agent
+
+        async_mock = AsyncMock(
+            side_effect=[
+                RuntimeError("unhandled errors in a TaskGroup (1 sub-exception)"),
+                {"ok": True},
+            ]
+        )
+        with patch.object(agent, "_mcp_call_tool_async", async_mock), patch.object(
+            agent.time, "sleep"
+        ) as sleep_mock, patch.dict(
+            os.environ, {"MCP_CLIENT_RETRY_ATTEMPTS": "2", "MCP_CLIENT_RETRY_DELAY_SECONDS": "0"}
+        ):
+            out = agent._mcp_call_tool(
+                mcp_url="http://mcp.example.test/mcp",
+                tool_name="incident_triage_run",
+                arguments={"incident_id": "INC-123", "service": "payments-api"},
+                api_key="k",
+                client_id="c",
+            )
+
+        self.assertEqual(out, {"ok": True})
+        self.assertEqual(async_mock.await_count, 2)
+        sleep_mock.assert_called_once()
 
     def test_main_slack_live_flag_sets_dry_run_false(self) -> None:
         from incident_triage_mcp.agents import langgraph_agent as agent
