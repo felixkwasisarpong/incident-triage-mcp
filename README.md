@@ -172,12 +172,17 @@ AUDIT_PATH=/data/audit.jsonl   # only used when AUDIT_MODE=file
 # Local runbooks (real data source, no creds)
 RUNBOOKS_DIR=./runbooks
 
-# Evidence backend (standalone-first)
+# Workflow backend (orchestration trigger path)
+#   none    -> no workflow trigger tools
+#   airflow -> expose airflow_* tools and enable DAG trigger calls
+WORKFLOW_BACKEND=none|airflow
+
+# Evidence backend (bundle storage/read path)
 #   fs      -> read/write local Evidence Bundle JSON files
 #   s3      -> read/write via S3 API (MinIO/S3)
-#   airflow -> expose airflow_* tools (requires Airflow env vars)
 #   none    -> disable evidence reads entirely
-EVIDENCE_BACKEND=fs|s3|airflow|none
+#   airflow -> legacy compatibility mode (infers WORKFLOW_BACKEND=airflow when unset)
+EVIDENCE_BACKEND=fs|s3|none|airflow
 
 # Local evidence directory for fs backend
 EVIDENCE_DIR=./evidence
@@ -185,7 +190,7 @@ EVIDENCE_DIR=./evidence
 # Legacy alias still supported (maps to fs|s3 when EVIDENCE_BACKEND is unset)
 ARTIFACT_STORE=fs|s3
 
-# Airflow API (required only when EVIDENCE_BACKEND=airflow)
+# Airflow API (required only when WORKFLOW_BACKEND=airflow)
 AIRFLOW_BASE_URL=http://localhost:8080
 AIRFLOW_USERNAME=<airflow-username>
 AIRFLOW_PASSWORD=<airflow-password>
@@ -408,7 +413,8 @@ The process will fail fast if prod requirements are not met (for example mock al
 If Airflow is already collecting + normalizing data into Evidence Bundles, you can run MCP in artifact-consumer mode:
 
 - Set `BUNDLE_ONLY_MODE=true`
-- Keep `EVIDENCE_BACKEND=airflow|fs|s3` (not `none`)
+- Keep `EVIDENCE_BACKEND=fs|s3` (or legacy `airflow`, but prefer split backend config) (not `none`)
+- Set `WORKFLOW_BACKEND=airflow` when MCP should trigger Airflow DAGs
 - MCP disables direct observability fetch tools (`alerts_fetch_active`, `service_health_snapshot`, `logs_fetch_recent`, `traces_fetch_recent`) and relies on bundle tools (`evidence_get_bundle`, `incident_triage_summary`, ticket/notify flows)
 
 ---
@@ -472,6 +478,7 @@ Boot MCP standalone with only stdio + local runbooks:
 ```bash
 MCP_TRANSPORT=stdio \
 RUNBOOKS_DIR=./runbooks \
+WORKFLOW_BACKEND=none \
 EVIDENCE_BACKEND=fs \
 EVIDENCE_DIR=./evidence \
 incident-triage-mcp
@@ -487,8 +494,8 @@ Offline demo flow (no Airflow required):
    - `jira_draft_ticket(incident_id="INC-123")`
 
 Notes:
-- `airflow_*` tools are only registered when `EVIDENCE_BACKEND=airflow`.
-- If `EVIDENCE_BACKEND=airflow` but Airflow env vars are missing, server still starts and Airflow tool calls return a clear `airflow_disabled` error.
+- `airflow_*` tools are registered when `WORKFLOW_BACKEND=airflow` (or legacy `EVIDENCE_BACKEND=airflow`).
+- If `WORKFLOW_BACKEND=airflow` but Airflow env vars are missing, server still starts and Airflow tool calls return a clear `airflow_disabled` error.
 
 Quick verification tests:
 
@@ -635,8 +642,8 @@ Notes:
 
 **Airflow produces** a single artifact per incident:
 
-- `fs: ./airflow/artifacts/<INCIDENT_ID>.json` (dev)
-- `s3: s3://triage-artifacts/evidence/v1/<INCIDENT_ID>.json` (Docker/K8s)
+- `fs: ./airflow/artifacts/<INCIDENT_ID>.json` (dev/local PVC)
+- `s3: s3://triage-artifacts/evidence/v1/<INCIDENT_ID>.json` (Docker/K8s/prod)
 
 The MCP server exposes tools to:
 - trigger evidence DAGs
@@ -645,7 +652,7 @@ The MCP server exposes tools to:
 
 This is the intended flow:
 
-1) Agent/host triggers evidence collection (Airflow DAG)
+1) Agent/host triggers evidence collection (Airflow DAG via `WORKFLOW_BACKEND=airflow`)
 2) Airflow writes the Evidence Bundle JSON artifact
 2.5) Agent/host optionally calls `evidence.wait_for_bundle` to poll until the artifact exists
 3) Agent/host reads the bundle via MCP tools
@@ -663,7 +670,7 @@ Typical demo sequence:
    - `mcp_traces_recent(limit=25)`
    - HTTP checks (streamable-http): `GET /healthz`, `GET /metrics`, `GET /traces?limit=25`
    - OTLP export status is included in `mcp_metrics().tracing.otlp_export`
-1) Trigger evidence collection:
+1) Trigger evidence collection (requires `WORKFLOW_BACKEND=airflow`):
    - `airflow_trigger_incident_dag(incident_id="INC-123", service="payments-api")`
 2) Wait for the Evidence Bundle:
    - `evidence_wait_for_bundle(incident_id="INC-123", timeout_seconds=90, poll_seconds=2)`
