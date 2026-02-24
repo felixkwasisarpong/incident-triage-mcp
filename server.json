@@ -13,7 +13,7 @@
     {
       "registryType": "pypi",
       "identifier": "incident-triage-mcp",
-      "version": "0.2.6",
+      "version": "0.2.7",
       "transport": {
         "type": "stdio"
       }
