@@ -3,7 +3,7 @@
   "name": "io.github.felixkwasisarpong/incident-triage-mcp",
   "title": "Incident Triage MCP",
   "description": "Incident triage MCP server with evidence summaries, Jira/Slack actions, and optional Airflow.",
-  "version": "0.2.5",
+  "version": "0.2.6",
   "repository": {
     "url": "https://github.com/felixkwasisarpong/incident-triage-mcp",
     "source": "github"
@@ -13,14 +13,14 @@
     {
       "registryType": "pypi",
       "identifier": "incident-triage-mcp",
-      "version": "0.2.5",
+      "version": "0.2.6",
       "transport": {
         "type": "stdio"
       }
     },
     {
       "registryType": "oci",
-      "identifier": "docker.io/fsarpong/incident-triage-mcp:0.2.5",
+      "identifier": "docker.io/fsarpong/incident-triage-mcp:0.2.6",
       "transport": {
         "type": "stdio"
       }
