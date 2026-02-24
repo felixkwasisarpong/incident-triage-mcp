@@ -47,6 +47,7 @@ class AppConfig:
     audit_path: str
 
     # Artifact store
+    workflow_backend: str
     evidence_backend: str
     evidence_dir: str
     artifact_store: str
@@ -92,6 +93,10 @@ class AppConfig:
 def load_config() -> AppConfig:
     artifact_store = (_env("ARTIFACT_STORE", "fs") or "fs").lower()
     evidence_backend = (_env("EVIDENCE_BACKEND") or artifact_store or "fs").lower()
+    workflow_backend = (_env("WORKFLOW_BACKEND") or "").lower()
+    if not workflow_backend:
+        # Backward compatibility: prior versions enabled Airflow workflow via EVIDENCE_BACKEND=airflow.
+        workflow_backend = "airflow" if evidence_backend == "airflow" else "none"
 
     cfg = AppConfig(
         deployment_profile=(_env("DEPLOYMENT_PROFILE", "local") or "local").lower(),
@@ -102,6 +107,7 @@ def load_config() -> AppConfig:
         audit_mode=(_env("AUDIT_MODE", "stdout") or "stdout").lower(),
         audit_path=_env("AUDIT_PATH", "audit.jsonl") or "audit.jsonl",
 
+        workflow_backend=workflow_backend,
         evidence_backend=evidence_backend,
         evidence_dir=_env("EVIDENCE_DIR", "./evidence") or "./evidence",
         artifact_store=artifact_store,
@@ -154,6 +160,8 @@ def load_config() -> AppConfig:
     # Validate evidence backend mode
     if cfg.evidence_backend not in {"none", "fs", "s3", "airflow"}:
         raise ConfigError("EVIDENCE_BACKEND must be one of: none, fs, s3, airflow")
+    if cfg.workflow_backend not in {"none", "airflow"}:
+        raise ConfigError("WORKFLOW_BACKEND must be one of: none, airflow")
 
     # Validate provider flags
     provider_sets = {

@@ -33,6 +33,28 @@ class TestAdapterScaffold(unittest.TestCase):
             with self.assertRaises(ConfigError):
                 load_config()
 
+    def test_config_rejects_invalid_workflow_backend(self) -> None:
+        with patch.dict(os.environ, {"WORKFLOW_BACKEND": "bad"}, clear=True):
+            with self.assertRaises(ConfigError):
+                load_config()
+
+    def test_config_infers_airflow_workflow_backend_from_legacy_evidence_backend(self) -> None:
+        with patch.dict(os.environ, {"EVIDENCE_BACKEND": "airflow"}, clear=True):
+            cfg = load_config()
+
+        self.assertEqual(cfg.workflow_backend, "airflow")
+
+    def test_config_allows_airflow_workflow_with_fs_evidence(self) -> None:
+        with patch.dict(
+            os.environ,
+            {"WORKFLOW_BACKEND": "airflow", "EVIDENCE_BACKEND": "fs"},
+            clear=True,
+        ):
+            cfg = load_config()
+
+        self.assertEqual(cfg.workflow_backend, "airflow")
+        self.assertEqual(cfg.evidence_backend, "fs")
+
     def test_config_rejects_invalid_ticket_provider_flag(self) -> None:
         with patch.dict(os.environ, {"JIRA_PROVIDER": "bad-provider"}, clear=True):
             with self.assertRaises(ConfigError):

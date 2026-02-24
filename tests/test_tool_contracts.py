@@ -124,7 +124,22 @@ class TestToolContracts(unittest.TestCase):
         self.assertTrue(CORE_TOOLS.issubset(tools))
         self.assertTrue(AIRFLOW_TOOLS.isdisjoint(tools))
 
-    def test_airflow_tools_are_registered_only_in_airflow_backend(self) -> None:
+    def test_airflow_tools_are_registered_when_workflow_backend_is_airflow(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tools = self._load_tool_names(
+                {
+                    "MCP_TRANSPORT": "stdio",
+                    "RUNBOOKS_DIR": tmpdir,
+                    "WORKFLOW_BACKEND": "airflow",
+                    "EVIDENCE_BACKEND": "fs",
+                    "EVIDENCE_DIR": tmpdir,
+                }
+            )
+
+        self.assertTrue(CORE_TOOLS.issubset(tools))
+        self.assertTrue(AIRFLOW_TOOLS.issubset(tools))
+
+    def test_airflow_tools_are_registered_in_legacy_evidence_airflow_mode(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             tools = self._load_tool_names(
                 {

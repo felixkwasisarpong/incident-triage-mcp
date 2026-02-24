@@ -187,6 +187,25 @@ class TestStandaloneMode(unittest.TestCase):
         self.assertFalse(artifact["enabled"])
         self.assertIn("airflow_disabled", artifact["error"])
 
+    def test_workflow_airflow_with_fs_evidence_registers_airflow_tools(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir, tempfile.TemporaryDirectory() as idempotency_tmp, patch.dict(
+            os.environ,
+            {
+                "MCP_TRANSPORT": "stdio",
+                "RUNBOOKS_DIR": tmpdir,
+                "WORKFLOW_BACKEND": "airflow",
+                "EVIDENCE_BACKEND": "fs",
+                "EVIDENCE_DIR": tmpdir,
+                "IDEMPOTENCY_STORE_PATH": str(Path(idempotency_tmp) / "jira_idempotency.json"),
+            },
+            clear=True,
+        ):
+            server = _reload_server_module()
+            tools = set(server.mcp._tool_manager._tools.keys())
+
+        self.assertIn("airflow_trigger_incident_dag", tools)
+        self.assertIn("airflow_get_incident_artifact", tools)
+
 
 if __name__ == "__main__":
     unittest.main()

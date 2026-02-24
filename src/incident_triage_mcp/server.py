@@ -464,6 +464,7 @@ def _http_health_payload() -> dict[str, Any]:
     health["tracing"]["otlp_export"] = _otlp_export_status()
     health["bundle_only_mode"] = CFG.bundle_only_mode
     health["transport"] = _active_transport()
+    health["workflow_backend"] = _workflow_backend()
     health["evidence_backend"] = _evidence_backend()
     health["providers"] = observability.provider_summary()
     health["airflow"] = {
@@ -478,6 +479,7 @@ def _http_metrics_payload() -> dict[str, Any]:
     snapshot.setdefault("tracing", {})["otlp_export"] = _otlp_export_status()
     snapshot["bundle_only_mode"] = CFG.bundle_only_mode
     snapshot["transport"] = _active_transport()
+    snapshot["workflow_backend"] = _workflow_backend()
     snapshot["evidence_backend"] = _evidence_backend()
     snapshot["providers"] = observability.provider_summary()
     return snapshot
@@ -532,6 +534,16 @@ def _build_idempotency_store() -> IdempotencyStore:
 ticket_idempotency_store = _build_idempotency_store()
 
 
+def _workflow_backend() -> str:
+    backend = (os.getenv("WORKFLOW_BACKEND") or CFG.workflow_backend or "").strip().lower()
+    if not backend:
+        # Backward compatibility with older EVIDENCE_BACKEND=airflow behavior.
+        backend = "airflow" if _evidence_backend() == "airflow" else "none"
+    if backend in {"none", "airflow"}:
+        return backend
+    return "none"
+
+
 def _evidence_backend() -> str:
     backend = (os.getenv("EVIDENCE_BACKEND") or CFG.evidence_backend or "").strip().lower()
     if not backend:
@@ -576,10 +588,11 @@ def _airflow_settings() -> tuple[str | None, str | None, str | None]:
 
 
 def _airflow_disabled_reason() -> str:
-    if _evidence_backend() != "airflow":
+    if _workflow_backend() != "airflow":
         return (
-            f"Airflow integration disabled: EVIDENCE_BACKEND={_evidence_backend()!r}. "
-            "Set EVIDENCE_BACKEND=airflow to enable Airflow tools."
+            f"Airflow workflow integration disabled: WORKFLOW_BACKEND={_workflow_backend()!r}. "
+            "Set WORKFLOW_BACKEND=airflow to enable Airflow tools "
+            "(or rely on legacy EVIDENCE_BACKEND=airflow inference)."
         )
     base_url, username, password = _airflow_settings()
     missing: list[str] = []
@@ -737,6 +750,7 @@ def incident_triage_run(
             "notify_provider": resolved_notify_provider if notify_slack else None,
             "slack_channel": slack_channel,
             "slack_dry_run": slack_dry_run,
+            "workflow_backend": _workflow_backend(),
             "evidence_backend": _evidence_backend(),
         },
         ok=True,
@@ -1200,7 +1214,12 @@ def airflow_trigger_incident_dag(incident_id: str, service: str) -> dict:
     conf = {"incident_id": incident_id, "service": service}
     corr = audit.write(
         "airflow.trigger_incident_dag",
-        {"dag_id": dag_id, "conf": conf, "evidence_backend": _evidence_backend()},
+        {
+            "dag_id": dag_id,
+            "conf": conf,
+            "workflow_backend": _workflow_backend(),
+            "evidence_backend": _evidence_backend(),
+        },
         ok=True,
         meta=meta,
         correlation_id=request_id,
@@ -1213,7 +1232,8 @@ def airflow_trigger_incident_dag(incident_id: str, service: str) -> dict:
         return {
             "correlation_id": corr,
             "enabled": False,
-            "backend": _evidence_backend(),
+            "workflow_backend": _workflow_backend(),
+            "evidence_backend": _evidence_backend(),
             "dag_id": dag_id,
             "dag_run": None,
             "error": f"airflow_disabled: {e}",
@@ -1225,30 +1245,59 @@ def airflow_get_incident_artifact(incident_id: str) -> dict:
     meta, request_id = _tool_request_meta("airflow.get_incident_artifact")
     corr = audit.write(
         "airflow.get_incident_artifact",
-        {"incident_id": incident_id, "evidence_backend": _evidence_backend()},
+        {
+            "incident_id": incident_id,
+            "workflow_backend": _workflow_backend(),
+            "evidence_backend": _evidence_backend(),
+        },
         ok=True,
         meta=meta,
         correlation_id=request_id,
     )
 
-    if _evidence_backend() == "airflow":
+    if _workflow_backend() == "airflow":
         _, reason = _get_airflow_client()
         if reason:
             return {
                 "correlation_id": corr,
                 "enabled": False,
-                "backend": "airflow",
+                "workflow_backend": _workflow_backend(),
+                "evidence_backend": _evidence_backend(),
                 "found": False,
                 "error": f"airflow_disabled: {reason}",
             }
 
+    if _evidence_backend() == "s3":
+        evidence = evidence_get_bundle(incident_id)
+        # Preserve historical shape (`artifact`) while delegating storage reads to EVIDENCE_BACKEND.
+        out = dict(evidence)
+        out["correlation_id"] = corr
+        if out.get("found") and "artifact" not in out and isinstance(out.get("bundle"), dict):
+            out["artifact"] = out["bundle"]
+        out["workflow_backend"] = _workflow_backend()
+        out["evidence_backend"] = _evidence_backend()
+        return out
+
     artifact_dir = Path(_primary_evidence_dir())
     path = artifact_dir / f"{incident_id}.json"
     if not path.exists():
-        return {"correlation_id": corr, "found": False, "path": str(path)}
+        return {
+            "correlation_id": corr,
+            "workflow_backend": _workflow_backend(),
+            "evidence_backend": _evidence_backend(),
+            "found": False,
+            "path": str(path),
+        }
 
     data = json.loads(path.read_text(encoding="utf-8"))
-    return {"correlation_id": corr, "found": True, "path": str(path), "artifact": data}
+    return {
+        "correlation_id": corr,
+        "workflow_backend": _workflow_backend(),
+        "evidence_backend": _evidence_backend(),
+        "found": True,
+        "path": str(path),
+        "artifact": data,
+    }
 
 
 @mcp.tool()
@@ -1679,7 +1728,7 @@ def jira_validate_credentials() -> dict:
         return {"correlation_id": corr, "ok": False, "error": str(e)}
 
 
-if _evidence_backend() == "airflow":
+if _workflow_backend() == "airflow":
     # Airflow tools are discoverable only when explicitly requested.
     mcp.tool()(airflow_trigger_incident_dag)
     mcp.tool()(airflow_get_incident_artifact)
