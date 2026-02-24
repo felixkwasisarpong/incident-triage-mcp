@@ -5,6 +5,7 @@ import asyncio
 import importlib
 import json
 import os
+import time
 from typing import Any, TypedDict
 
 from mcp.client.session import ClientSession
@@ -81,6 +82,49 @@ def _extract_tool_result_payload(result: Any) -> dict[str, Any]:
     raise RuntimeError("Remote MCP tool call returned an unexpected payload format.")
 
 
+def _flatten_exception_messages(exc: BaseException) -> list[str]:
+    messages: list[str] = []
+    stack: list[BaseException] = [exc]
+    while stack:
+        current = stack.pop(0)
+        text = str(current).strip() or current.__class__.__name__
+        messages.append(f"{current.__class__.__name__}: {text}")
+        nested = getattr(current, "exceptions", None)
+        if isinstance(nested, tuple):
+            for child in nested:
+                if isinstance(child, BaseException):
+                    stack.append(child)
+    return messages
+
+
+def _format_agent_error(exc: BaseException) -> str:
+    parts = _flatten_exception_messages(exc)
+    # Preserve order but avoid repeating the same message text.
+    unique_parts: list[str] = []
+    seen: set[str] = set()
+    for part in parts:
+        if part in seen:
+            continue
+        seen.add(part)
+        unique_parts.append(part)
+    return " | ".join(unique_parts)
+
+
+def _is_transient_mcp_client_error(exc: BaseException) -> bool:
+    text = str(exc)
+    transient_markers = (
+        "TaskGroup",
+        "EndOfStream",
+        "BrokenResourceError",
+        "ConnectionResetError",
+        "RemoteProtocolError",
+        "Server disconnected",
+        "timed out",
+        "timeout",
+    )
+    return any(marker in text for marker in transient_markers)
+
+
 async def _mcp_call_tool_async(
     *,
     mcp_url: str,
@@ -109,15 +153,27 @@ def _mcp_call_tool(
     api_key: str | None = None,
     client_id: str | None = None,
 ) -> dict[str, Any]:
-    return asyncio.run(
-        _mcp_call_tool_async(
-            mcp_url=mcp_url,
-            tool_name=tool_name,
-            arguments=arguments,
-            api_key=api_key,
-            client_id=client_id,
-        )
-    )
+    attempts = max(1, int(os.getenv("MCP_CLIENT_RETRY_ATTEMPTS", "2")))
+    delay_seconds = max(0.0, float(os.getenv("MCP_CLIENT_RETRY_DELAY_SECONDS", "0.25")))
+    last_exc: BaseException | None = None
+    for attempt in range(1, attempts + 1):
+        try:
+            return asyncio.run(
+                _mcp_call_tool_async(
+                    mcp_url=mcp_url,
+                    tool_name=tool_name,
+                    arguments=arguments,
+                    api_key=api_key,
+                    client_id=client_id,
+                )
+            )
+        except Exception as exc:
+            last_exc = exc
+            if attempt >= attempts or not _is_transient_mcp_client_error(exc):
+                raise
+            time.sleep(delay_seconds)
+    assert last_exc is not None  # pragma: no cover
+    raise last_exc
 
 
 def _remote_enabled(state: IncidentGraphState) -> bool:
@@ -149,7 +205,7 @@ def _run_triage_node(state: IncidentGraphState) -> IncidentGraphState:
             result = server.incident_triage_run(**kwargs)
         return {"result": result}
     except Exception as exc:  # pragma: no cover - covered via run_agent tests
-        return {"error": str(exc)}
+        return {"error": _format_agent_error(exc)}
 
 
 def _route_after_triage(state: IncidentGraphState) -> str:
@@ -193,7 +249,7 @@ def _create_live_ticket_node(state: IncidentGraphState) -> IncidentGraphState:
             return {"result": merged, "live_ticket": ticket}
         return {"live_ticket": ticket}
     except Exception as exc:  # pragma: no cover - covered via run_agent tests
-        return {"error": str(exc)}
+        return {"error": _format_agent_error(exc)}
 
 
 def _route_after_live_ticket(state: IncidentGraphState) -> str:
