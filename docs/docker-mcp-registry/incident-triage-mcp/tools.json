@@ -1,0 +1,37 @@
+{
+  "generated_from": "tests/test_tool_contracts.py (v0.2.8)",
+  "notes": [
+    "This is a submission aid / reviewer reference. Validate against docker/mcp-registry tooling and replace with registry-native format if required.",
+    "Airflow tools are conditional and are registered only when WORKFLOW_BACKEND=airflow (legacy EVIDENCE_BACKEND=airflow also supported)."
+  ],
+  "core_tools": [
+    "alerts_fetch_active",
+    "evidence_get_bundle",
+    "evidence_seed_sample",
+    "evidence_wait_for_bundle",
+    "incident_triage_run",
+    "incident_triage_summary",
+    "jira_create_ticket",
+    "jira_draft_ticket",
+    "jira_list_issue_types",
+    "jira_list_projects",
+    "jira_validate_credentials",
+    "logs_fetch_recent",
+    "mcp_health",
+    "mcp_metrics",
+    "mcp_traces_recent",
+    "notify_post_update",
+    "ping",
+    "runbooks_search",
+    "service_health_snapshot",
+    "slack_post_update",
+    "teams_post_update",
+    "traces_fetch_recent"
+  ],
+  "conditional_tools": {
+    "workflow_backend=airflow": [
+      "airflow_get_incident_artifact",
+      "airflow_trigger_incident_dag"
+    ]
+  }
+}

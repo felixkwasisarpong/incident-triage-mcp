@@ -1,0 +1,126 @@
+# Draft Docker MCP Registry entry for docker/mcp-registry
+# Validate/normalize with the registry tooling (`task wizard`, `task build`) before submitting.
+# Source metadata synced to incident-triage-mcp v0.2.8.
+
+name: incident-triage-mcp
+title: Incident Triage MCP
+type: server
+description: Incident triage MCP server with evidence summaries, Jira/Slack actions, and optional Airflow.
+image: docker.io/fsarpong/incident-triage-mcp:0.2.8
+icon: https://raw.githubusercontent.com/felixkwasisarpong/incident-triage-mcp/main/docs/assets/icon.png
+
+source:
+  project: https://github.com/felixkwasisarpong/incident-triage-mcp
+  branch: main
+  commit: eeb1d95857b71fd7bced8575ea4a559417d211c9
+
+readme: |
+  Incident Triage MCP is a Model Context Protocol (MCP) server for evidence-driven incident response workflows.
+
+  It provides auditable tools for:
+  - incident triage summaries
+  - evidence bundle retrieval / wait-for-bundle orchestration
+  - Jira / ServiceNow ticket draft + create
+  - Slack / Teams notifications
+  - optional Airflow DAG trigger integration
+
+  Safe defaults for Docker MCP Toolkit / catalog usage:
+  - MCP_TRANSPORT=stdio
+  - WORKFLOW_BACKEND=none
+  - EVIDENCE_BACKEND=fs
+  - JIRA_PROVIDER=mock
+
+  Full docs and deployment guides:
+  https://github.com/felixkwasisarpong/incident-triage-mcp
+
+config:
+  env:
+    MCP_TRANSPORT:
+      type: string
+      default: stdio
+      description: Transport mode for local container execution in Docker MCP Toolkit.
+    WORKFLOW_BACKEND:
+      type: string
+      default: none
+      description: Workflow orchestrator backend (none or airflow).
+    EVIDENCE_BACKEND:
+      type: string
+      default: fs
+      description: Evidence storage backend (fs, s3, none). Legacy airflow mode is still supported.
+    EVIDENCE_DIR:
+      type: string
+      default: /evidence
+      description: Filesystem evidence directory for local mode.
+    RUNBOOKS_DIR:
+      type: string
+      default: /runbooks
+      description: Local runbooks directory.
+    JIRA_PROVIDER:
+      type: string
+      default: mock
+      description: Ticket provider (mock, cloud, servicenow).
+    JIRA_PROJECT_KEY:
+      type: string
+      default: INC
+      description: Default project key for Jira draft/create flows.
+    JIRA_ISSUE_TYPE:
+      type: string
+      default: Task
+      description: Default issue type for Jira ticket creation.
+    MCP_ROLE:
+      type: string
+      default: responder
+      description: RBAC role for MCP tool execution.
+    BUNDLE_ONLY_MODE:
+      type: string
+      default: "true"
+      description: Disables direct provider fetch tools; consumes normalized evidence bundles only.
+    AIRFLOW_BASE_URL:
+      type: string
+      description: Optional Airflow API base URL when WORKFLOW_BACKEND=airflow.
+    AIRFLOW_API_VERSION:
+      type: string
+      description: Optional Airflow API version override (auto, v1, v2).
+    AIRFLOW_AUTH_MODE:
+      type: string
+      description: Optional Airflow auth mode override (auto, token).
+    JIRA_BASE_URL:
+      type: string
+      description: Jira Cloud base URL when JIRA_PROVIDER=cloud.
+    JIRA_EMAIL:
+      type: string
+      description: Jira Cloud email when JIRA_PROVIDER=cloud.
+    SLACK_DEFAULT_CHANNEL:
+      type: string
+      description: Optional default Slack channel for notifications.
+    TEAMS_DEFAULT_CHANNEL:
+      type: string
+      description: Optional default Teams channel for notifications.
+  secrets:
+    AIRFLOW_USERNAME:
+      type: string
+      description: Airflow username for API access when WORKFLOW_BACKEND=airflow.
+    AIRFLOW_PASSWORD:
+      type: string
+      description: Airflow password for API access when WORKFLOW_BACKEND=airflow.
+    AIRFLOW_ACCESS_TOKEN:
+      type: string
+      description: Optional pre-issued Airflow API token (Airflow 3).
+    JIRA_API_TOKEN:
+      type: string
+      description: Jira Cloud API token when JIRA_PROVIDER=cloud.
+    SERVICENOW_USERNAME:
+      type: string
+      description: ServiceNow username when JIRA_PROVIDER=servicenow.
+    SERVICENOW_PASSWORD:
+      type: string
+      description: ServiceNow password when JIRA_PROVIDER=servicenow.
+    SLACK_WEBHOOK_URL:
+      type: string
+      description: Slack Incoming Webhook URL.
+    TEAMS_WEBHOOK_URL:
+      type: string
+      description: Teams webhook URL.
+    CONFIRM_TOKEN:
+      type: string
+      description: Optional safe-action confirmation token for live ticket/notification actions.
