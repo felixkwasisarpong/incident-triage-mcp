@@ -6,6 +6,14 @@ import unittest
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
+try:  # Python 3.11+
+    ExceptionGroupType = ExceptionGroup  # type: ignore[name-defined]
+except NameError:  # pragma: no cover - exercised on Python <3.11
+    class ExceptionGroupType(Exception):
+        def __init__(self, message: str, exceptions: list[BaseException]) -> None:
+            super().__init__(message)
+            self.exceptions = tuple(exceptions)
+
 
 ROOT = Path(__file__).resolve().parents[1]
 SRC = ROOT / "src"
@@ -160,7 +168,7 @@ class TestLangGraphAgent(unittest.TestCase):
     def test_run_agent_remote_surfaces_inner_exceptiongroup_error(self) -> None:
         from incident_triage_mcp.agents import langgraph_agent as agent
 
-        exc = ExceptionGroup("unhandled errors in a TaskGroup", [RuntimeError("stream closed")])
+        exc = ExceptionGroupType("unhandled errors in a TaskGroup", [RuntimeError("stream closed")])
         with patch.object(agent, "_mcp_call_tool", side_effect=exc):
             state = agent.run_agent(
                 incident_id="INC-501",
