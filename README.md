@@ -31,9 +31,9 @@ It exposes structured, auditable triage tools (evidence collection, runbook sear
 - **Evidence Bundle artifact:** a single JSON “source of truth” produced by workflows
 - **Artifact store:** filesystem (dev) or S3-compatible (MinIO/S3) for Docker/Kubernetes
 - **Audit-first:** JSONL audit events (stdout by default for k8s)
-- **Built-in service telemetry:** request/adaptor counters + latency via `mcp_health` and `mcp_metrics`
+- **Built-in service telemetry:** request/adapter counters + latency via `mcp_health` and `mcp_metrics`
 - **HTTP health endpoints:** `/healthz` and `/metrics` for streamable-http deployments
-- **Guardrails:** RBAC + safe-action allowlists (WIP / expanding)
+- **Guardrails:** RBAC + safe actions (confirm tokens) + audit + idempotent ticket creates
 - **Pluggable integrations:** mock-first, real adapters added progressively (env-based provider selection)
 - **Safe ticketing:** draft Jira tickets + gated create (dry-run by default, RBAC + confirm token)
 - **Real idempotency for creates:** reusing `idempotency_key` returns the existing issue
@@ -188,6 +188,7 @@ EVIDENCE_BACKEND=fs|s3|none|airflow
 EVIDENCE_DIR=./evidence
 
 # Legacy alias still supported (maps to fs|s3 when EVIDENCE_BACKEND is unset)
+# Prefer explicit EVIDENCE_BACKEND + WORKFLOW_BACKEND in new deployments.
 ARTIFACT_STORE=fs|s3
 
 # Airflow API (required only when WORKFLOW_BACKEND=airflow)
@@ -413,8 +414,9 @@ The process will fail fast if prod requirements are not met (for example mock al
 If Airflow is already collecting + normalizing data into Evidence Bundles, you can run MCP in artifact-consumer mode:
 
 - Set `BUNDLE_ONLY_MODE=true`
-- Keep `EVIDENCE_BACKEND=fs|s3` (or legacy `airflow`, but prefer split backend config) (not `none`)
-- Set `WORKFLOW_BACKEND=airflow` when MCP should trigger Airflow DAGs
+- Keep `EVIDENCE_BACKEND=fs|s3` (not `none`)
+- Set `WORKFLOW_BACKEND=airflow` only if MCP should trigger Airflow DAGs
+- Use `WORKFLOW_BACKEND=none` if another system already triggers the workflow
 - MCP disables direct observability fetch tools (`alerts_fetch_active`, `service_health_snapshot`, `logs_fetch_recent`, `traces_fetch_recent`) and relies on bundle tools (`evidence_get_bundle`, `incident_triage_summary`, ticket/notify flows)
 
 ---
@@ -496,6 +498,9 @@ Offline demo flow (no Airflow required):
 Notes:
 - `airflow_*` tools are registered when `WORKFLOW_BACKEND=airflow` (or legacy `EVIDENCE_BACKEND=airflow`).
 - If `WORKFLOW_BACKEND=airflow` but Airflow env vars are missing, server still starts and Airflow tool calls return a clear `airflow_disabled` error.
+- Recommended new config split:
+  - local offline: `WORKFLOW_BACKEND=none`, `EVIDENCE_BACKEND=fs`
+  - local/prod workflow mode: `WORKFLOW_BACKEND=airflow`, `EVIDENCE_BACKEND=fs|s3`
 
 Quick verification tests:
 
@@ -513,12 +518,16 @@ One-command standalone smoke check:
 
 ---
 
-## Docker Compose (Airflow + Postgres + MCP)
+## Docker Compose (Airflow + Postgres + MinIO + MCP)
 
 This repo supports a local dev stack where:
 - **Airflow** runs evidence workflows
 - **MinIO (S3-compatible)** stores Evidence Bundles so the setup also works in Kubernetes
 - **MCP server** reads Evidence Bundles from MinIO/S3 (or filesystem in dev mode)
+
+Recommended backend split for this stack:
+- `WORKFLOW_BACKEND=airflow`
+- `EVIDENCE_BACKEND=s3`
 
 ### Start
 
@@ -656,7 +665,7 @@ This is the intended flow:
 2) Airflow writes the Evidence Bundle JSON artifact
 2.5) Agent/host optionally calls `evidence.wait_for_bundle` to poll until the artifact exists
 3) Agent/host reads the bundle via MCP tools
-4) (later) ticket creation + safe actions use the same bundle
+4) Ticket creation + safe actions use the same bundle
 
 ---
 
@@ -776,7 +785,7 @@ Install from the local chart scaffold:
 helm upgrade --install incident-triage-mcp ./charts/incident-triage-mcp \
   --namespace incident-triage --create-namespace \
   --set image.repository=ghcr.io/felixkwasisarpong/incident-triage-mcp \
-  --set image.tag=0.2.5 \
+  --set image.tag=0.2.6 \
   --set env.DEPLOYMENT_PROFILE=staging \
   --set env.MCP_TRANSPORT=streamable-http \
   --set secretEnv.MCP_HTTP_API_KEY=change-me
@@ -790,15 +799,19 @@ Useful overrides:
 
 ---
 
-## Roadmap (next)
+## Status and Next Steps
 
-- ✅ Ticketing: Jira draft + gated create (mock provider); add Jira Cloud provider wiring + richer formatting
-- ✅ Artifact store for Docker/K8s via MinIO/S3 (filesystem remains for fast local dev)
+### Implemented
+
+- ✅ Ticketing: Jira draft + gated create (mock/cloud/ServiceNow), idempotent create, Jira discovery tools, ADF formatting
+- ✅ Artifact backends: filesystem + S3/MinIO (Docker/K8s-friendly)
 - ✅ Deployment profiles (`local`/`staging`/`prod`) with guardrails and env templates
-- ✅ Built-in MCP observability tools (`mcp_health`, `mcp_metrics`)
-- ✅ Add a Helm chart + GitHub Actions to build/push multi-arch Docker images
-- Expand **RBAC + safe actions** with preconditions and approval tokens
-- ✅ Add richer **tracing** for MCP internals (`mcp_traces_recent`, `/traces` endpoint, in-memory span buffer)
+- ✅ Built-in MCP observability tools (`mcp_health`, `mcp_metrics`, `mcp_traces_recent`, `/healthz`, `/metrics`, `/traces`)
+- ✅ Helm chart + GitHub Actions for build/publish workflows
+- ✅ Airflow 3 API support (`/api/v2` + token auth) and networked agent -> MCP -> Airflow flow
+- ✅ MCP backend split: `WORKFLOW_BACKEND` (orchestration) vs `EVIDENCE_BACKEND` (storage/read path)
+- ✅ Safe actions baseline: RBAC + confirm tokens + audit + idempotent ticket creates
+
 
 ---
 
