@@ -6,4 +6,18 @@
 /airflow/ @felixkwasisarpong
 /dags/ @felixkwasisarpong
 /spec/ @felixkwasisarpong
+/spec/** @felixkwasisarpong
+/rfcs/ @felixkwasisarpong
+/docs/ @felixkwasisarpong
+/contrib/** @felixkwasisarpong
+/packages/mcp-server-python/ @felixkwasisarpong
+/packages/agent-langgraph/ @felixkwasisarpong
+/packages/evidence-sdk/ @felixkwasisarpong
+/packages/dispatcher/ @felixkwasisarpong
+/packages/airflow-dags/ @felixkwasisarpong
 /.github/ @felixkwasisarpong
+
+# Planned team aliases (replace with real teams when created):
+#   @spec-owners -> /spec, /rfcs
+#   @docs-owners -> /docs
+#   @mcp-owners, @agent-owners, @sdk-owners, @dispatcher-owners, @airflow-owners -> /packages/*

@@ -84,6 +84,23 @@ Rules:
 - Must include tests and docs.
 - Prefer adding provider adapters in Airflow (not MCP) unless justified.
 
+## Polyglot Contributions (contrib/)
+
+- Use `contrib/` for new polyglot components without changing current Python package layout.
+- Follow contract requirements in `spec/`:
+  - `spec/evidence-bundle.v1.schema.json`
+  - `spec/mcp-tools.v1.json` (if tool schema compatibility applies)
+- Keep component boundaries clear:
+  - dispatcher: webhook ingest + Job trigger plumbing
+  - agent host: orchestration/runtime host that calls MCP
+  - evidence SDK/providers: evidence-plane adapters used by Airflow
+
+Run contract validation locally:
+
+```bash
+pytest -q tests/test_contract_evidence_bundle.py tests/test_contract_mcp_tools.py
+```
+
 ## Pull Request Process
 
 - Keep PRs focused and avoid unrelated refactors.
