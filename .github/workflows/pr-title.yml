@@ -1,0 +1,37 @@
+name: PR Title Check
+
+on:
+  pull_request_target:
+    types:
+      - opened
+      - edited
+      - synchronize
+      - reopened
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  title-format:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Validate title format (warning only)
+        env:
+          PR_TITLE: ${{ github.event.pull_request.title }}
+        run: |
+          set -euo pipefail
+          PATTERN='^(feat|fix|chore|docs|refactor)\([a-z0-9._/-]+\): .+'
+          if [[ "${PR_TITLE}" =~ ${PATTERN} ]]; then
+            echo "PR title format looks good: ${PR_TITLE}"
+            exit 0
+          fi
+
+          SUGGESTION="Use conventional title format: feat(scope): summary, fix(scope): summary,"
+          SUGGESTION="${SUGGESTION} chore(scope): summary, docs(scope): summary,"
+          SUGGESTION="${SUGGESTION} or refactor(scope): summary."
+          EXAMPLE="Example: chore(ci): add PR labeler workflow"
+          echo "::warning title=PR title format suggestion::${SUGGESTION} ${EXAMPLE}"
+          echo "Current title: ${PR_TITLE}"
+          # Warning-only by design; this does not fail the workflow.
+          exit 0

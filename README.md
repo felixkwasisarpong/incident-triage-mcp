@@ -41,6 +41,14 @@ Supported MCP transports in released artifacts:
 
 ---
 
+## Support & Triage
+
+- GitHub Discussions (if enabled): https://github.com/felixkwasisarpong/incident-triage-mcp/discussions
+- Issues (bugs/features): https://github.com/felixkwasisarpong/incident-triage-mcp/issues
+- Vulnerability reports: see [SECURITY.md](SECURITY.md)
+
+---
+
 ## Features
 
 - **True MCP transports:** `stdio` and `streamable-http`

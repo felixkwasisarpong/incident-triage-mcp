@@ -1,0 +1,26 @@
+area/mcp:
+  - changed-files:
+      - any-glob-to-any-file:
+          - src/**
+
+area/airflow:
+  - changed-files:
+      - any-glob-to-any-file:
+          - airflow/**
+          - dags/**
+
+area/spec:
+  - changed-files:
+      - any-glob-to-any-file:
+          - spec/**
+
+area/docs:
+  - changed-files:
+      - any-glob-to-any-file:
+          - docs/**
+          - examples/**
+
+area/infra:
+  - changed-files:
+      - any-glob-to-any-file:
+          - .github/**

@@ -1,0 +1,28 @@
+name: Stale Issue Cleanup
+
+on:
+  schedule:
+    - cron: "23 6 * * 1"
+  workflow_dispatch:
+
+permissions:
+  issues: write
+
+jobs:
+  stale:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Mark and close stale issues (gentle policy)
+        uses: actions/stale@v9
+        with:
+          days-before-issue-stale: 75
+          days-before-issue-close: 21
+          stale-issue-message: >-
+            This issue has been inactive for a while. If this is still relevant,
+            comment with an update and we will keep it open.
+          close-issue-message: >-
+            Closing due to inactivity. Feel free to reopen with fresh context.
+          exempt-issue-labels: pinned,security,help wanted,good first issue
+          days-before-pr-stale: -1
+          days-before-pr-close: -1
+          remove-stale-when-updated: true
