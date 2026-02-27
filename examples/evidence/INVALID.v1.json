@@ -1,0 +1,14 @@
+{
+  "schema_version": "v1",
+  "service": "payments-api",
+  "time_window": {
+    "start_iso": "2026-01-01T00:00:00Z"
+  },
+  "alerts": [
+    {
+      "name": "Error rate elevated",
+      "status": "triggered",
+      "provider": "mock"
+    }
+  ]
+}

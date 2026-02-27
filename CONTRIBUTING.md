@@ -65,6 +65,7 @@ Open an issue before starting large features, architecture changes, or breaking 
 
 - Keep MCP tool interfaces backward compatible unless a maintainer approves a migration plan.
 - Preserve the `EvidenceBundle v1` contract.
+- All evidence bundles must validate against `spec/evidence-bundle.v1.schema.json`.
 - Do not weaken mutation guardrails:
   - `dry_run` safe path
   - `confirm_token` for non-dry-run execution
