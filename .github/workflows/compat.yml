@@ -1,0 +1,99 @@
+name: Compatibility Guard
+
+on:
+  pull_request:
+    types:
+      - opened
+      - edited
+      - synchronize
+      - reopened
+      - ready_for_review
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  spec-compatibility-nudge:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check for v1 schema changes and RFC reference
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const marker = '<!-- compat-rfc-nudge -->';
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            const pr = context.payload.pull_request;
+
+            if (!pr) {
+              core.info('No pull request context; skipping.');
+              return;
+            }
+
+            const files = await github.paginate(
+              github.rest.pulls.listFiles,
+              {
+                owner,
+                repo,
+                pull_number: pr.number,
+                per_page: 100,
+              }
+            );
+
+            const touchesV1Schema = files.some(
+              (f) => f.filename === 'spec/evidence-bundle.v1.schema.json'
+            );
+
+            if (!touchesV1Schema) {
+              core.info('No changes to spec/evidence-bundle.v1.schema.json.');
+              return;
+            }
+
+            const body = pr.body || '';
+            const hasRfcReference = /RFC:\s*|rfcs\//i.test(body);
+
+            if (hasRfcReference) {
+              core.notice('RFC reference found in PR body.');
+              return;
+            }
+
+            const message = `${marker}
+            This PR modifies \`spec/evidence-bundle.v1.schema.json\` but the PR body does not reference an RFC.
+
+            Please add an RFC link or identifier, for example:
+            - \`RFC: rfcs/0001-your-topic.md\`
+
+            This is a compatibility nudge and does not block merge.`;
+
+            core.warning('v1 schema changed without RFC reference in PR body.');
+
+            const comments = await github.paginate(
+              github.rest.issues.listComments,
+              {
+                owner,
+                repo,
+                issue_number: pr.number,
+                per_page: 100,
+              }
+            );
+
+            const existing = comments.find((c) =>
+              c.user?.type === 'Bot' && (c.body || '').includes(marker)
+            );
+
+            if (existing) {
+              await github.rest.issues.updateComment({
+                owner,
+                repo,
+                comment_id: existing.id,
+                body: message,
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner,
+                repo,
+                issue_number: pr.number,
+                body: message,
+              });
+            }
