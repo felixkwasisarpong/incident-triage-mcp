@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Discussions
+    url: https://github.com/felixkwasisarpong/incident-triage-mcp/discussions
+    about: Ask questions, share ideas, and discuss roadmap topics.
+  - name: Security reports
+    url: https://github.com/felixkwasisarpong/incident-triage-mcp/security/advisories/new
+    about: Report vulnerabilities privately via GitHub Security Advisories.
