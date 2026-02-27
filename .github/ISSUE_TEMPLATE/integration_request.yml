@@ -1,0 +1,63 @@
+name: Integration request
+description: Request a new provider/integration path
+title: "[Integration]: "
+labels:
+  - integration
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Use this template for new provider adapters or integration pathways.
+  - type: input
+    id: integration_name
+    attributes:
+      label: Integration name
+      placeholder: "e.g. NewRelic, Splunk, PagerDuty extension"
+    validations:
+      required: true
+  - type: dropdown
+    id: integration_type
+    attributes:
+      label: Integration type
+      options:
+        - Evidence source
+        - Ticketing
+        - Notifications
+        - Workflow/orchestration
+        - Other
+    validations:
+      required: true
+  - type: dropdown
+    id: layer
+    attributes:
+      label: Preferred implementation layer
+      description: Prefer Airflow provider adapters unless MCP-level integration is necessary.
+      options:
+        - Airflow (preferred)
+        - MCP server
+        - Unsure
+    validations:
+      required: true
+  - type: textarea
+    id: justification
+    attributes:
+      label: Justification
+      description: Why this integration is needed and why this layer is appropriate.
+    validations:
+      required: true
+  - type: textarea
+    id: contract
+    attributes:
+      label: Contract and safety impact
+      description: Note effects on `EvidenceBundle v1`, MCP interfaces, and mutating safety gates.
+    validations:
+      required: true
+  - type: checkboxes
+    id: checklist
+    attributes:
+      label: Checklist
+      options:
+        - label: I considered implementing this in Airflow first.
+          required: true
+        - label: I identified test and documentation updates needed.
+          required: true

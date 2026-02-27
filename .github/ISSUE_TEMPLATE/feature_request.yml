@@ -1,0 +1,49 @@
+name: Feature request
+description: Propose an improvement to incident-triage-mcp
+title: "[Feature]: "
+labels:
+  - enhancement
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Please describe the problem first, then the proposed solution.
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem statement
+      description: What user pain does this solve?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+      description: Include API/tool shape changes if applicable.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+  - type: dropdown
+    id: compatibility
+    attributes:
+      label: Contract impact
+      description: Does this affect existing interfaces?
+      options:
+        - No breaking change expected
+        - Potential breaking change (needs migration plan)
+    validations:
+      required: true
+  - type: checkboxes
+    id: requirements
+    attributes:
+      label: Requirements
+      options:
+        - label: I considered `EvidenceBundle v1` compatibility.
+          required: true
+        - label: I considered mutation safety gates (`dry_run`, `confirm_token`, audit, idempotency).
+          required: true
+        - label: I am willing to help with implementation or review.
+          required: false

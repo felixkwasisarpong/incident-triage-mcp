@@ -1,0 +1,9 @@
+# Default owner (easy to expand later)
+* @felixkwasisarpong
+
+# Review channels
+/src/incident_triage_mcp/* @felixkwasisarpong
+/airflow/ @felixkwasisarpong
+/dags/ @felixkwasisarpong
+/spec/ @felixkwasisarpong
+/.github/ @felixkwasisarpong

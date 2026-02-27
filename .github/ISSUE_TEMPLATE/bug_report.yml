@@ -1,0 +1,70 @@
+name: Bug report
+description: Report a reproducible bug in incident-triage-mcp
+title: "[Bug]: "
+labels:
+  - bug
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting a bug. Please provide enough detail for maintainers to reproduce quickly.
+  - type: input
+    id: version
+    attributes:
+      label: Version or commit
+      description: Which release/tag/commit are you using?
+      placeholder: "e.g. 0.2.8 or main@<sha>"
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Affected area
+      options:
+        - MCP server/runtime
+        - Tool schema/contract
+        - Airflow integration
+        - Adapter/provider integration
+        - Documentation
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: description
+    attributes:
+      label: What happened?
+      description: Describe the observed behavior.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: Exact steps, input payloads, and config if relevant.
+      placeholder: |
+        1. Set env ...
+        2. Call tool ...
+        3. Observe ...
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant logs or traces
+      description: Paste sanitized logs only (no secrets).
+      render: shell
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Checklist
+      options:
+        - label: I searched existing issues before opening this report.
+          required: true
+        - label: I removed secrets and sensitive incident data.
+          required: true

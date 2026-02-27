@@ -1,20 +1,37 @@
 ## Summary
-What does this change do and why?
 
-## Changes
-- Key changes (bullets)
-- Files/modules affected
+<!-- What changed? Keep it brief and concrete. -->
 
-## How to Run
-- Commands to build/run locally (Docker or node)
+## Why
 
-## Tests
-- Command(s) used:
-  - `npm test`
-- What the tests cover (brief)
+<!-- Why is this needed? Link issue(s) if possible. -->
 
-## Architecture Notes
-Any important design decisions or trade-offs.
+## Type of Change
 
-## Trade-offs / TODO
-What would be improved with more time?
+- [ ] Bug fix
+- [ ] Feature
+- [ ] Documentation
+- [ ] Refactor
+- [ ] Test-only
+- [ ] Other
+
+## Validation
+
+- [ ] `pytest -q` ran successfully
+- [ ] Added/updated tests for changed behavior
+- [ ] Added/updated docs for changed behavior
+
+## Compatibility and Safety Checklist
+
+- [ ] MCP interface/schema compatibility preserved, or migration plan documented
+- [ ] `EvidenceBundle v1` contract preserved, or migration plan documented
+- [ ] If mutating tools were touched: `dry_run`, `confirm_token`, audit, and idempotency safeguards remain intact
+- [ ] No unrelated refactors
+
+## AI Assistance (if used)
+
+<!-- Describe AI usage and what was human-reviewed/edited. -->
+
+## Links
+
+- Closes #
