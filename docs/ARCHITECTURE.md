@@ -37,6 +37,19 @@
 - MCP tools should remain backward compatible.
 - Agents should not call provider APIs directly; they should call MCP tools.
 
+## Contract Versioning
+
+- `EvidenceBundle v1` is the canonical artifact shape and is defined in `spec/evidence-bundle.v1.schema.json`.
+- Bundle-only mode keeps the agent surface focused on MCP bundle tools (`evidence_get_bundle`, `evidence_wait_for_bundle`, `incident_triage_summary`) instead of direct provider API calls.
+- Contract files are versioned under `spec/` and examples live under `examples/evidence/`.
+
+To introduce `EvidenceBundle v2`:
+
+1. Add `spec/evidence-bundle.v2.schema.json` without modifying `v1`.
+2. Add `spec/mcp-tools.v2.json` if tool contract semantics change.
+3. Add passing/failing v2 examples and contract tests.
+4. Document migration and compatibility expectations before deprecating older versions.
+
 ## Mutation Safety Model
 
 Non-dry-run mutating actions must preserve all gates:

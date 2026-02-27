@@ -1,0 +1,45 @@
+{
+  "schema_version": "v1",
+  "incident_id": "INC-123",
+  "service": "payments-api",
+  "time_window": {
+    "start_iso": "2026-01-01T00:00:00Z",
+    "end_iso": "2026-01-01T00:30:00Z"
+  },
+  "alerts": [
+    {
+      "name": "Error rate elevated",
+      "status": "triggered",
+      "priority": "P2",
+      "provider": "mock",
+      "alert_id": "alrt-inc-123-001"
+    }
+  ],
+  "signals": [
+    {
+      "key": "error_rate",
+      "value": 0.12,
+      "unit": "ratio"
+    },
+    {
+      "key": "latency_p95_ms",
+      "value": 840,
+      "unit": "ms"
+    }
+  ],
+  "runbook_hits": [
+    {
+      "doc_id": "5xx-spike-checklist",
+      "title": "5xx Spike Checklist",
+      "score": 0.82,
+      "summary": "Validate deploy changes and dependent service health."
+    }
+  ],
+  "links": [
+    {
+      "type": "dashboard",
+      "url": "https://example.local/dashboards/payments"
+    }
+  ],
+  "generated_at_iso": "2026-01-01T00:31:00Z"
+}

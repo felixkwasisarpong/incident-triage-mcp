@@ -1,0 +1,217 @@
+{
+  "schema_version": "v1",
+  "description": "High-level MCP tool contract for cross-language implementations.",
+  "tools": [
+    {
+      "name": "evidence_get_bundle",
+      "purpose": "Fetch a normalized EvidenceBundle for an incident from the configured evidence backend.",
+      "inputs": {
+        "incident_id": {
+          "type": "string",
+          "required": true
+        }
+      },
+      "outputs": {
+        "found": {
+          "type": "boolean"
+        },
+        "backend": {
+          "type": "string"
+        },
+        "bundle": {
+          "type": "object",
+          "description": "EvidenceBundle v1 object when found=true"
+        },
+        "path": {
+          "type": "string"
+        },
+        "uri": {
+          "type": "string"
+        },
+        "error": {
+          "type": "string"
+        }
+      },
+      "mutating": false,
+      "requires_confirm_token": false,
+      "idempotent": true
+    },
+    {
+      "name": "evidence_wait_for_bundle",
+      "purpose": "Poll for an EvidenceBundle until found or timeout.",
+      "inputs": {
+        "incident_id": {
+          "type": "string",
+          "required": true
+        },
+        "timeout_seconds": {
+          "type": "integer",
+          "required": false,
+          "default": 30
+        },
+        "poll_seconds": {
+          "type": "integer",
+          "required": false,
+          "default": 2
+        }
+      },
+      "outputs": {
+        "found": {
+          "type": "boolean"
+        },
+        "bundle": {
+          "type": "object",
+          "description": "EvidenceBundle v1 object when found=true"
+        },
+        "attempts": {
+          "type": "integer"
+        },
+        "timeout_seconds": {
+          "type": "integer"
+        },
+        "error": {
+          "type": "string"
+        }
+      },
+      "mutating": false,
+      "requires_confirm_token": false,
+      "idempotent": true
+    },
+    {
+      "name": "incident_triage_summary",
+      "purpose": "Generate a deterministic incident summary from EvidenceBundle v1.",
+      "inputs": {
+        "incident_id": {
+          "type": "string",
+          "required": true
+        }
+      },
+      "outputs": {
+        "incident_id": {
+          "type": "string"
+        },
+        "service": {
+          "type": "string"
+        },
+        "headline": {
+          "type": "string"
+        },
+        "priority": {
+          "type": "string"
+        },
+        "status": {
+          "type": "string"
+        },
+        "generated_at_iso": {
+          "type": "string"
+        },
+        "error": {
+          "type": "string"
+        }
+      },
+      "mutating": false,
+      "requires_confirm_token": false,
+      "idempotent": true
+    },
+    {
+      "name": "jira_draft_ticket",
+      "purpose": "Build a non-mutating draft ticket payload from EvidenceBundle v1.",
+      "inputs": {
+        "incident_id": {
+          "type": "string",
+          "required": true
+        },
+        "project_key": {
+          "type": "string",
+          "required": false
+        }
+      },
+      "outputs": {
+        "incident_id": {
+          "type": "string"
+        },
+        "project_key": {
+          "type": "string"
+        },
+        "issue_type": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        },
+        "description_md": {
+          "type": "string"
+        },
+        "generated_at_iso": {
+          "type": "string"
+        },
+        "error": {
+          "type": "string"
+        }
+      },
+      "mutating": false,
+      "requires_confirm_token": false,
+      "idempotent": true
+    },
+    {
+      "name": "jira_create_ticket",
+      "purpose": "Create (or dry-run) a Jira ticket with safety gates and idempotency for non-dry-run execution.",
+      "inputs": {
+        "incident_id": {
+          "type": "string",
+          "required": true
+        },
+        "project_key": {
+          "type": "string",
+          "required": false
+        },
+        "dry_run": {
+          "type": "boolean",
+          "required": false,
+          "default": true
+        },
+        "reason": {
+          "type": "string",
+          "required": false,
+          "description": "Required when dry_run=false"
+        },
+        "confirm_token": {
+          "type": "string",
+          "required": false,
+          "description": "Required when dry_run=false"
+        },
+        "idempotency_key": {
+          "type": "string",
+          "required": false,
+          "description": "Required when dry_run=false"
+        }
+      },
+      "outputs": {
+        "created": {
+          "type": "boolean"
+        },
+        "dry_run": {
+          "type": "boolean"
+        },
+        "idempotent_replay": {
+          "type": "boolean"
+        },
+        "issue_key": {
+          "type": "string"
+        },
+        "browse_url": {
+          "type": "string"
+        },
+        "provider": {
+          "type": "string"
+        },
+        "error": {
+          "type": "string"
+        }
+      },
+      "mutating": true,
+      "requires_confirm_token": true,
+      "idempotent": true
+    }
+  ]
+}
