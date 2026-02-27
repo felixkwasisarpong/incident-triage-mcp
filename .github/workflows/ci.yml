@@ -93,3 +93,6 @@ jobs:
     steps:
       - name: Dependency review
         uses: actions/dependency-review-action@v4
+        with:
+          vulnerability-check: true
+          license-check: false

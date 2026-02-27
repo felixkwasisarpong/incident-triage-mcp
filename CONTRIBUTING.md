@@ -25,7 +25,7 @@ Pull requests are validated by lightweight checks in `.github/workflows/ci.yml`:
 
 - `lint-yaml-json-md`: `yamllint`, JSON validation, and markdown lint
 - `python-checks`: editable install, `ruff`, and `pytest`
-- `security-scan`: dependency review on pull requests
+- `security-scan`: dependency vulnerability review on pull requests
 
 Run locally before opening a PR:
 
