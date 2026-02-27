@@ -19,6 +19,38 @@ pip install pytest
 5. Make your change and add/update tests.
 6. Open a PR using `.github/PULL_REQUEST_TEMPLATE.md`.
 
+## CI / PR Checks
+
+Pull requests are validated by lightweight checks in `.github/workflows/ci.yml`:
+
+- `lint-yaml-json-md`: `yamllint`, JSON validation, and markdown lint
+- `python-checks`: editable install, `ruff`, and `pytest`
+- `security-scan`: dependency review on pull requests
+
+Run locally before opening a PR:
+
+```bash
+python -m pip install --upgrade pip
+pip install -e .
+pip install pytest ruff yamllint
+
+yamllint -c .yamllint.yml .github/workflows .github/ISSUE_TEMPLATE .github/labels.yml docs/docker-mcp-registry/incident-triage-mcp/server.yaml docker-compose.yml k8s
+python -m json.tool server.json >/dev/null
+python -m json.tool docs/docker-mcp-registry/incident-triage-mcp/tools.json >/dev/null
+# optional (requires Node.js): npx markdownlint-cli2 CONTRIBUTING.md CODE_OF_CONDUCT.md SECURITY.md GOVERNANCE.md MAINTAINERS.md AGENTS.md \"docs/**/*.md\"
+ruff check src tests
+pytest -q
+```
+
+## Labels and Triage
+
+Issues and PRs use label groups in `.github/labels.yml`:
+
+- Area: `area/mcp`, `area/airflow`, `area/agent`, `area/spec`, `area/infra`, `area/docs`
+- Kind: `kind/bug`, `kind/feature`, `kind/docs`, `kind/chore`
+- Priority: `priority/p0` to `priority/p3`
+- Contributor-friendly: `good first issue`, `help wanted`
+
 ## Contribution Scope
 
 Good first contributions:

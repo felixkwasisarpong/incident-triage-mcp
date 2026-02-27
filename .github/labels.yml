@@ -1,0 +1,51 @@
+- name: area/mcp
+  color: "0E8A16"
+  description: Changes to MCP interfaces, server behavior, or tool contracts.
+- name: area/airflow
+  color: "1D76DB"
+  description: Changes to Airflow DAGs, orchestration, or evidence workflows.
+- name: area/agent
+  color: "5319E7"
+  description: Changes to agent integration or invocation flows.
+- name: area/spec
+  color: "006B75"
+  description: Changes to contracts, schemas, or protocol specs.
+- name: area/infra
+  color: "FBCA04"
+  description: Changes to deployment, Docker, Kubernetes, or release plumbing.
+- name: area/docs
+  color: "C2E0C6"
+  description: Documentation and contributor-facing guidance updates.
+
+- name: kind/bug
+  color: "D73A4A"
+  description: Defect or regression fix.
+- name: kind/feature
+  color: "A2EEEF"
+  description: New capability or enhancement.
+- name: kind/docs
+  color: "0075CA"
+  description: Documentation-only changes.
+- name: kind/chore
+  color: "BFD4F2"
+  description: Maintenance, refactor, or housekeeping work.
+
+- name: priority/p0
+  color: "B60205"
+  description: Critical issue requiring immediate attention.
+- name: priority/p1
+  color: "D93F0B"
+  description: High priority; address in the next cycle.
+- name: priority/p2
+  color: "FBCA04"
+  description: Normal priority.
+- name: priority/p3
+  color: "0E8A16"
+  description: Low priority / backlog.
+
+- name: good first issue
+  color: "7057FF"
+  description: Good starter task for first-time contributors.
+- name: help wanted
+  color: "008672"
+  description: Community contributions are especially welcome.

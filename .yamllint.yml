@@ -1,0 +1,17 @@
+extends: default
+
+ignore: |
+  .venv/
+
+rules:
+  line-length:
+    max: 140
+    level: warning
+  comments: disable
+  comments-indentation: disable
+  commas: disable
+  document-start: disable
+  indentation: disable
+  key-duplicates: disable
+  new-line-at-end-of-file: disable
+  truthy: disable
