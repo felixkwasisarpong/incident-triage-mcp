@@ -23,6 +23,24 @@ It exposes structured, auditable triage tools (evidence collection, runbook sear
 
 ---
 
+## Releases
+
+- PyPI package:
+  - `pip install incident-triage-mcp==X.Y.Z`
+- GHCR image:
+  - `docker pull ghcr.io/felixkwasisarpong/incident-triage-mcp:X.Y.Z`
+
+Supported image tags:
+- `X.Y.Z` (exact release)
+- `X.Y` (minor stream)
+- `latest` (most recent release)
+
+Supported MCP transports in released artifacts:
+- `stdio`
+- `streamable-http`
+
+---
+
 ## Features
 
 - **True MCP transports:** `stdio` and `streamable-http`
