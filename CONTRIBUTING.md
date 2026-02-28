@@ -19,39 +19,37 @@ pip install pytest
 5. Make your change and add/update tests.
 6. Open a PR using `.github/PULL_REQUEST_TEMPLATE.md`.
 
-## CI / PR Checks
+## Local Checks
 
-Pull requests are validated by lightweight checks in `.github/workflows/ci.yml`:
-
-- `lint-yaml-json-md`: `yamllint`, JSON validation, and markdown lint
-- `python-checks`: editable install, `ruff`, and `pytest`
-- `security-scan`: dependency vulnerability review on pull requests
-
-Run locally before opening a PR:
+Run these commands before opening a PR:
 
 ```bash
 python -m pip install --upgrade pip
 pip install -e .
-pip install pytest ruff yamllint
+pip install pytest ruff
 
-yamllint -c .yamllint.yml .github/workflows .github/ISSUE_TEMPLATE .github/labels.yml docs/docker-mcp-registry/incident-triage-mcp/server.yaml docker-compose.yml k8s
-python -m json.tool server.json >/dev/null
-python -m json.tool docs/docker-mcp-registry/incident-triage-mcp/tools.json >/dev/null
-# optional (requires Node.js): npx markdownlint-cli2 CONTRIBUTING.md CODE_OF_CONDUCT.md SECURITY.md GOVERNANCE.md MAINTAINERS.md AGENTS.md \"docs/**/*.md\"
 ruff check src tests
+# Format-check changed Python files in your branch:
+CHANGED_PY=$(git diff --name-only --diff-filter=ACMRT origin/main...HEAD | grep -E '^(src|tests)/.*\.py$' || true)
+if [ -n "$CHANGED_PY" ]; then
+  ruff format --check $CHANGED_PY
+fi
 pytest -q
-```
-
-## Contract Checks
-
-Contract safety checks are run in `.github/workflows/contracts.yml` for pull requests and pushes to `main`.
-
-Run locally before opening a PR:
-
-```bash
 pytest -k contract -q
 python scripts/validate_contrib.py
 ```
+
+## CI Checks
+
+Pull requests and pushes to `main` run automated checks:
+
+- `.github/workflows/ci.yml`
+  - `lint`: `ruff check` + `ruff format --check`
+  - `test`: `pytest -q`
+  - `secrets-scan`: gitleaks (blocking)
+  - `dependency-review`: dependency review on PRs
+- `.github/workflows/contracts.yml`
+  - Contract tests for `spec/` + contrib structure and secrets hygiene
 
 ## Labels and Triage
 

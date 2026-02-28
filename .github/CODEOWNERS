@@ -1,23 +1,9 @@
-# Default owner (easy to expand later)
-* @felixkwasisarpong @aasanakey @TitoLanna
+# Default owner
+* @felixkwasisarpong
 
-# Review channels
-/src/incident_triage_mcp/* @felixkwasisarpong @aasanakey @TitoLanna
-/airflow/ @felixkwasisarpong @aasanakey @TitoLanna
-/dags/ @felixkwasisarpong @aasanakey @TitoLanna
-/spec/ @felixkwasisarpong @aasanakey @TitoLanna
-/spec/** @felixkwasisarpong @aasanakey @TitoLanna
-/rfcs/ @felixkwasisarpong @aasanakey @TitoLanna
-/docs/ @felixkwasisarpong @aasanakey @TitoLanna
-/contrib/** @felixkwasisarpong @aasanakey @TitoLanna
-/packages/mcp-server-python/ @felixkwasisarpong @aasanakey @TitoLanna
-/packages/agent-langgraph/ @felixkwasisarpong @aasanakey @TitoLanna
-/packages/evidence-sdk/ @felixkwasisarpong @aasanakey @TitoLanna
-/packages/dispatcher/ @felixkwasisarpong @aasanakey @TitoLanna
-/packages/airflow-dags/ @felixkwasisarpong @aasanakey @TitoLanna
-/.github/ @felixkwasisarpong @aasanakey @TitoLanna
-
-# Planned team aliases (replace with real teams when created):
-#   @spec-owners -> /spec, /rfcs
-#   @docs-owners -> /docs
-#   @mcp-owners, @agent-owners, @sdk-owners, @dispatcher-owners, @airflow-owners -> /packages/*
+# PR10 review routing
+/src/** @felixkwasisarpong
+/spec/** @felixkwasisarpong
+/.github/** @felixkwasisarpong
+/docs/** @felixkwasisarpong
+/contrib/** @felixkwasisarpong
