@@ -1,21 +1,21 @@
 # Default owner (easy to expand later)
-* @felixkwasisarpong
+* @felixkwasisarpong @aasanakey @TitoLanna
 
 # Review channels
-/src/incident_triage_mcp/* @felixkwasisarpong
-/airflow/ @felixkwasisarpong
-/dags/ @felixkwasisarpong
-/spec/ @felixkwasisarpong
-/spec/** @felixkwasisarpong
-/rfcs/ @felixkwasisarpong
-/docs/ @felixkwasisarpong
-/contrib/** @felixkwasisarpong
-/packages/mcp-server-python/ @felixkwasisarpong
-/packages/agent-langgraph/ @felixkwasisarpong
-/packages/evidence-sdk/ @felixkwasisarpong
-/packages/dispatcher/ @felixkwasisarpong
-/packages/airflow-dags/ @felixkwasisarpong
-/.github/ @felixkwasisarpong
+/src/incident_triage_mcp/* @felixkwasisarpong @aasanakey @TitoLanna
+/airflow/ @felixkwasisarpong @aasanakey @TitoLanna
+/dags/ @felixkwasisarpong @aasanakey @TitoLanna
+/spec/ @felixkwasisarpong @aasanakey @TitoLanna
+/spec/** @felixkwasisarpong @aasanakey @TitoLanna
+/rfcs/ @felixkwasisarpong @aasanakey @TitoLanna
+/docs/ @felixkwasisarpong @aasanakey @TitoLanna
+/contrib/** @felixkwasisarpong @aasanakey @TitoLanna
+/packages/mcp-server-python/ @felixkwasisarpong @aasanakey @TitoLanna
+/packages/agent-langgraph/ @felixkwasisarpong @aasanakey @TitoLanna
+/packages/evidence-sdk/ @felixkwasisarpong @aasanakey @TitoLanna
+/packages/dispatcher/ @felixkwasisarpong @aasanakey @TitoLanna
+/packages/airflow-dags/ @felixkwasisarpong @aasanakey @TitoLanna
+/.github/ @felixkwasisarpong @aasanakey @TitoLanna
 
 # Planned team aliases (replace with real teams when created):
 #   @spec-owners -> /spec, /rfcs
