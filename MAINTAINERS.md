@@ -5,6 +5,8 @@ Current maintainers for `incident-triage-mcp`.
 | Name | GitHub | Role | Focus Areas | Status |
 | --- | --- | --- | --- | --- |
 | Felix Kwasisarpong | [@felixkwasisarpong](https://github.com/felixkwasisarpong) | Lead Maintainer | MCP interfaces, Airflow integration, releases | Active |
+| Augustine Ayiku Sanakey | [@aasanakey](https://github.com/aasanakey) | Maintainer | Triage, docs, integrations | Active |
+| Matthias Anum Otoo | [@TitoLanna](https://github.com/TitoLanna) | Maintainer | Platform, tooling, integrations | Active |
 
 ## Updating This File
 
