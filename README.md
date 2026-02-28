@@ -9,856 +9,224 @@
 ![Kubernetes](https://img.shields.io/badge/kubernetes-ready-326CE5?logo=kubernetes&logoColor=white)
 ![License](https://img.shields.io/badge/license-MIT-lightgrey)
 
-Incident Triage MCP is a **Model Context Protocol (MCP)** tool server for incident response.
+Incident Triage MCP is a Model Context Protocol (MCP) server for incident triage. It provides safe, auditable tools for evidence retrieval, deterministic summaries, ticket workflows, and notifications.
 
-It exposes structured, auditable triage tools (evidence collection, runbook search, safe actions, ticketing integrations, etc.) so AI agents (or LLM hosts) can diagnose and respond to outages **with guardrails**.
+## What This Project Is
 
----
+- MCP control plane for incident triage tools.
+- Compatible with local (`stdio`) and networked (`streamable-http`) MCP clients.
+- Designed for standalone mode, Docker Compose, and Kubernetes.
 
-## What this project is (and isn’t)
+## What This Project Is Not
 
-- ✅ **Is:** an MCP server that provides incident-triage tools + a workflow-friendly “evidence bundle” artifact.
-- ✅ **Is:** designed to run locally (Claude Desktop stdio), via Docker (HTTP), and in Kubernetes.
-- ❌ **Is not:** an LLM agent by itself. Agents/hosts call these tools.
+- Not a standalone LLM agent platform.
+- Not a provider credentials vault.
+- Not a replacement for your evidence pipeline; it consumes normalized evidence bundles.
 
----
+## Architecture Snapshot
 
-## Releases
+- MCP server stays thin and policy-focused.
+- Evidence collection runs in Airflow (optional) and writes EvidenceBundle artifacts.
+- Agents call MCP tools only.
+- Contract stability is defined under `spec/`.
 
-- PyPI package:
-  - `pip install incident-triage-mcp==X.Y.Z`
-- GHCR image:
-  - `docker pull ghcr.io/felixkwasisarpong/incident-triage-mcp:X.Y.Z`
+For full details, see [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
-Supported image tags:
-- `X.Y.Z` (exact release)
-- `X.Y` (minor stream)
-- `latest` (most recent release)
+## Core Tools
 
-Supported MCP transports in released artifacts:
-- `stdio`
-- `streamable-http`
+| Tool | Purpose | Mutating |
+|---|---|---|
+| `evidence_get_bundle` | Fetch normalized EvidenceBundle for an incident | No |
+| `evidence_wait_for_bundle` | Poll until bundle is available | No |
+| `incident_triage_summary` | Build deterministic triage summary from bundle | No |
+| `jira_draft_ticket` | Build non-mutating ticket draft | No |
+| `jira_create_ticket` | Create ticket with safety gates | Yes |
 
----
+Mutating actions are guarded by RBAC, `dry_run`, `confirm_token`, audit logging, and idempotency.
 
-## Support & Triage
+## Provider Matrix
 
-- GitHub Discussions (if enabled): https://github.com/felixkwasisarpong/incident-triage-mcp/discussions
-- Issues (bugs/features): https://github.com/felixkwasisarpong/incident-triage-mcp/issues
-- Vulnerability reports: see [SECURITY.md](SECURITY.md)
+| Area | Supported providers |
+|---|---|
+| Alerts | `mock`, `datadog`, `cloudwatch`, `prometheus`, `pagerduty`, `opsgenie` |
+| Metrics | `mock`, `datadog`, `cloudwatch`, `prometheus` |
+| Logs | `mock`, `datadog`, `cloudwatch`, `elk`, `none` |
+| Traces | `mock`, `datadog`, `cloudwatch`, `xray`, `otel`, `none` |
+| Ticketing (`JIRA_PROVIDER`) | `mock`, `cloud`, `servicenow` |
+| Notify (`NOTIFY_PROVIDER`) | `slack`, `teams` |
 
----
+## Quick Start
 
-## Features
-
-- **True MCP transports:** `stdio` and `streamable-http`
-- **Tool discovery:** tools are auto-discovered by MCP clients (e.g., `tools/list`)
-- **Structured schemas:** Pydantic models for tool inputs/outputs
-- **Evidence Bundle artifact:** a single JSON “source of truth” produced by workflows
-- **Artifact store:** filesystem (dev) or S3-compatible (MinIO/S3) for Docker/Kubernetes
-- **Audit-first:** JSONL audit events (stdout by default for k8s)
-- **Built-in service telemetry:** request/adapter counters + latency via `mcp_health` and `mcp_metrics`
-- **HTTP health endpoints:** `/healthz` and `/metrics` for streamable-http deployments
-- **Guardrails:** RBAC + safe actions (confirm tokens) + audit + idempotent ticket creates
-- **Pluggable integrations:** mock-first, real adapters added progressively (env-based provider selection)
-- **Safe ticketing:** draft Jira tickets + gated create (dry-run by default, RBAC + confirm token)
-- **Real idempotency for creates:** reusing `idempotency_key` returns the existing issue
-- **Slack/Teams updates:** post incident summary + ticket context (safe dry-run by default)
-- **Jira discovery tools:** list accessible projects and project-specific issue types (read-only)
-- **Jira Cloud rich text:** draft content renders as clean ADF (H2 section headings + bullet lists + inline bold/code)
-- **Demo-friendly tools:** `evidence.wait_for_bundle` and deterministic `incident.triage_summary`
-- **Local LangGraph CLI agent:** run end-to-end triage without Claude Desktop restarts
-- **Automated tests:** unit tests cover all MCP tools in `server.py`
-
----
-
-## Project layout
-
-```text
-incident-triage-mcp/
-  pyproject.toml
-  README.md
-  docker-compose.yml
-  deploy/
-    profiles/
-      local.env.example
-      staging.env.example
-      prod.env.example
-  airflow/
-    dags/
-    artifacts/
-  runbooks/
-  src/
-    incident_triage_mcp/
-      __init__.py
-      server.py
-      audit.py
-      domain_models.py
-      tools/
-      adapters/
-      policy/
-  k8s/
-    deployment.yaml
-    service.yaml
-    airflow-creds.yaml
-```
-
----
-
-## Quick start (local)
-
-### 1) Install + run (stdio)
+### Local (stdio)
 
 ```bash
-# RBAC + safe actions
-MCP_ROLE=viewer|triager|responder|admin
-CONFIRM_TOKEN=CHANGE_ME_12345   # required for non-dry-run safe actions
-
-# Jira provider selection
-JIRA_PROVIDER=mock|cloud|servicenow
-JIRA_PROJECT_KEY=INC
-JIRA_ISSUE_TYPE=Task
-
-# Jira Cloud (required when JIRA_PROVIDER=cloud)
-JIRA_BASE_URL=https://your-domain.atlassian.net
-JIRA_EMAIL=you@example.com
-JIRA_API_TOKEN=***
-
-# ServiceNow (required when JIRA_PROVIDER=servicenow)
-SERVICENOW_BASE_URL=https://your-instance.service-now.com
-SERVICENOW_USERNAME=incident_bot
-SERVICENOW_PASSWORD=***
-SERVICENOW_TABLE=incident
-
-# from repo root
+python -m venv .venv
+source .venv/bin/activate
 pip install -e .
 
-# if you plan to use AWS-backed adapters/backends (CloudWatch, X-Ray, S3 evidence)
-pip install -e ".[aws]"
-
-# stdio transport (for Claude Desktop)
-MCP_TRANSPORT=stdio incident-triage-mcp
-```
-
-### Packaging entrypoints (pip + docker)
-
-Pip console scripts:
-
-```bash
-# MCP server
-incident-triage-mcp
-
-# Local LangGraph runner
-incident-triage-agent --incident-id INC-123 --service payments-api --artifact-store fs --artifact-dir ./evidence
-```
-
-Docker image entrypoint:
-
-```bash
-# Default: starts MCP server (streamable-http on :3333)
-docker run --rm -p 3333:3333 incident-triage-mcp:latest
-
-# Override command: runs via uv in-project env
-docker run --rm incident-triage-mcp:latest incident-triage-agent --incident-id INC-123 --service payments-api
-```
-
-### 2) Key environment variables
-
-```bash
-# MCP
-DEPLOYMENT_PROFILE=local|staging|prod
-MCP_TRANSPORT=stdio|streamable-http
-MCP_HOST=0.0.0.0
-MCP_PORT=3333
-BUNDLE_ONLY_MODE=false          # when true, disables direct observability fetch tools
-
-# Internal tracing (in-memory span buffer)
-MCP_TRACE_ENABLED=true
-MCP_TRACE_BUFFER_SIZE=200
-# Optional OTLP/HTTP export (best-effort)
-MCP_OTLP_ENABLED=false
-MCP_OTLP_ENDPOINT=http://otel-collector:4318/v1/traces
-MCP_OTLP_TIMEOUT_SECONDS=2
-MCP_OTLP_HEADERS=Authorization=Bearer-token
-
-# HTTP auth boundary (applies only when MCP_TRANSPORT=streamable-http)
-MCP_HTTP_AUTH_MODE=none|api_key|jwt_hs256
-MCP_HTTP_API_KEY=<required-when-mode-is-api_key>
-MCP_HTTP_JWT_SECRET=<required-when-mode-is-jwt_hs256>
-MCP_HTTP_JWT_ISSUER=<optional-expected-iss-claim>
-MCP_HTTP_JWT_AUDIENCE=<optional-expected-aud-claim>
-MCP_HTTP_JWT_LEEWAY_SECONDS=30
-# Optional request correlation headers from caller:
-#   x-request-id or x-correlation-id
-
-# Audit logging (k8s-friendly)
-AUDIT_MODE=stdout|file         # default: stdout
-AUDIT_PATH=/data/audit.jsonl   # only used when AUDIT_MODE=file
-
-# Local runbooks (real data source, no creds)
-RUNBOOKS_DIR=./runbooks
-
-# Workflow backend (orchestration trigger path)
-#   none    -> no workflow trigger tools
-#   airflow -> expose airflow_* tools and enable DAG trigger calls
-WORKFLOW_BACKEND=none|airflow
-
-# Evidence backend (bundle storage/read path)
-#   fs      -> read/write local Evidence Bundle JSON files
-#   s3      -> read/write via S3 API (MinIO/S3)
-#   none    -> disable evidence reads entirely
-#   airflow -> legacy compatibility mode (infers WORKFLOW_BACKEND=airflow when unset)
-EVIDENCE_BACKEND=fs|s3|none|airflow
-
-# Local evidence directory for fs backend
-EVIDENCE_DIR=./evidence
-
-# Legacy alias still supported (maps to fs|s3 when EVIDENCE_BACKEND is unset)
-# Prefer explicit EVIDENCE_BACKEND + WORKFLOW_BACKEND in new deployments.
-ARTIFACT_STORE=fs|s3
-
-# Airflow API (required only when WORKFLOW_BACKEND=airflow)
-AIRFLOW_BASE_URL=http://localhost:8080
-AIRFLOW_USERNAME=<airflow-username>
-AIRFLOW_PASSWORD=<airflow-password>
-
-# S3-compatible artifact store (required when EVIDENCE_BACKEND=s3)
-# Requires optional extra: pip install "incident-triage-mcp[aws]"
-S3_ENDPOINT_URL=http://localhost:9000
-S3_BUCKET=triage-artifacts
-S3_REGION=us-east-1
-AWS_ACCESS_KEY_ID=minioadmin
-AWS_SECRET_ACCESS_KEY=minioadmin
-
-# Ticket provider selection
-JIRA_PROVIDER=mock|cloud|servicenow
-
-# Jira ticket defaults
-JIRA_PROJECT_KEY=INC
-JIRA_ISSUE_TYPE=Task
-
-# Jira Cloud credentials (required when JIRA_PROVIDER=cloud)
-JIRA_BASE_URL=https://your-domain.atlassian.net
-JIRA_EMAIL=you@example.com
-JIRA_API_TOKEN=***
-
-# ServiceNow credentials (required when JIRA_PROVIDER=servicenow)
-SERVICENOW_BASE_URL=https://your-instance.service-now.com
-SERVICENOW_USERNAME=incident_bot
-SERVICENOW_PASSWORD=***
-SERVICENOW_TABLE=incident
-SERVICENOW_CATEGORY=inquiry
-
-# Notification provider
-NOTIFY_PROVIDER=slack|teams
-
-# Slack notifications (used when NOTIFY_PROVIDER=slack)
-SLACK_WEBHOOK_URL=https://hooks.slack.com/services/...
-SLACK_DEFAULT_CHANNEL=#incident-triage
-
-# Teams notifications (used when NOTIFY_PROVIDER=teams)
-TEAMS_WEBHOOK_URL=https://outlook.office.com/webhook/...
-TEAMS_DEFAULT_CHANNEL="Incident Triage"
-
-# Idempotency storage for ticket create retries
-# file (default) keeps local/dev behavior; redis/postgres are durable backends for prod.
-IDEMPOTENCY_BACKEND=file|redis|postgres|none
-
-# File backend (IDEMPOTENCY_BACKEND=file)
-IDEMPOTENCY_STORE_PATH=./data/jira_idempotency.json
-
-# Redis backend (IDEMPOTENCY_BACKEND=redis)
-IDEMPOTENCY_REDIS_URL=redis://localhost:6379/0
-IDEMPOTENCY_REDIS_KEY_PREFIX=incident-triage:idempotency:
-IDEMPOTENCY_REDIS_TTL_SECONDS=604800
-
-# Postgres backend (IDEMPOTENCY_BACKEND=postgres)
-IDEMPOTENCY_POSTGRES_DSN=postgresql://user:pass@localhost:5432/incident_triage
-IDEMPOTENCY_POSTGRES_TABLE=jira_idempotency
-
-# Adapter provider selection (prod scaffold; defaults are mock)
-ALERTS_PROVIDER=mock|datadog|cloudwatch|prometheus|pagerduty|opsgenie
-METRICS_PROVIDER=mock|datadog|cloudwatch|prometheus
-LOGS_PROVIDER=mock|datadog|cloudwatch|elk|none
-TRACES_PROVIDER=mock|datadog|cloudwatch|xray|otel|none
-
-# Datadog credentials (required when ALERTS_PROVIDER or METRICS_PROVIDER is datadog)
-DATADOG_API_KEY=<datadog-api-key>
-DATADOG_APP_KEY=<datadog-application-key>
-DATADOG_SITE=datadoghq.com
-
-# CloudWatch settings (used when ALERTS_PROVIDER or METRICS_PROVIDER is cloudwatch)
-# Requires optional extra: pip install "incident-triage-mcp[aws]"
-# Auth can come from env credentials below or IAM role/default AWS credential chain.
-AWS_REGION=us-east-1
-AWS_ACCESS_KEY_ID=<optional-static-key>
-AWS_SECRET_ACCESS_KEY=<optional-static-secret>
-CLOUDWATCH_NAMESPACE=IncidentTriage
-CLOUDWATCH_DIMENSION_NAME=Service
-CLOUDWATCH_ERROR_RATE_METRIC=ErrorRate
-CLOUDWATCH_LATENCY_P95_METRIC=LatencyP95
-CLOUDWATCH_RPS_METRIC=RequestsPerSecond
-CLOUDWATCH_PERIOD_SECONDS=60
-
-# Prometheus settings (used when ALERTS_PROVIDER or METRICS_PROVIDER is prometheus)
-PROMETHEUS_BASE_URL=http://localhost:9090
-PROMETHEUS_BEARER_TOKEN=<optional-bearer-token>
-PROMETHEUS_USERNAME=<optional-basic-auth-username>
-PROMETHEUS_PASSWORD=<optional-basic-auth-password>
-PROMETHEUS_SERVICE_LABEL=service
-PROMETHEUS_QUERY_STEP_SECONDS=60
-PROMETHEUS_ERROR_RATE_QUERY=sum(rate(http_server_errors_total{service="{service}"}[5m])) / clamp_min(sum(rate(http_server_requests_total{service="{service}"}[5m])), 1)
-PROMETHEUS_LATENCY_P95_MS_QUERY=histogram_quantile(0.95, sum(rate(http_server_request_duration_seconds_bucket{service="{service}"}[5m])) by (le)) * 1000
-PROMETHEUS_RPS_QUERY=sum(rate(http_server_requests_total{service="{service}"}[5m]))
-
-# PagerDuty settings (used when ALERTS_PROVIDER=pagerduty)
-PAGERDUTY_API_TOKEN=<pagerduty-rest-api-token>
-PAGERDUTY_BASE_URL=https://api.pagerduty.com
-PAGERDUTY_HTTP_TIMEOUT_SECONDS=10
-
-# Opsgenie settings (used when ALERTS_PROVIDER=opsgenie)
-OPSGENIE_API_KEY=<opsgenie-api-key>
-OPSGENIE_BASE_URL=https://api.opsgenie.com
-OPSGENIE_HTTP_TIMEOUT_SECONDS=10
-
-# ELK/OpenSearch settings (used when LOGS_PROVIDER=elk)
-ELASTICSEARCH_BASE_URL=http://localhost:9200
-ELASTICSEARCH_LOG_INDEX=logs-*
-ELASTICSEARCH_TIMESTAMP_FIELD=@timestamp
-ELASTICSEARCH_SERVICE_FIELD=service.name
-ELASTICSEARCH_MESSAGE_FIELDS=message,log.original,event.original
-ELASTICSEARCH_API_KEY=<optional-api-key>
-ELASTICSEARCH_USERNAME=<optional-basic-auth-username>
-ELASTICSEARCH_PASSWORD=<optional-basic-auth-password>
-ELASTICSEARCH_HTTP_TIMEOUT_SECONDS=10
-
-# X-Ray settings (used when TRACES_PROVIDER=xray)
-# Requires optional extra: pip install "incident-triage-mcp[aws]"
-# Auth can come from env credentials below or IAM role/default AWS credential chain.
-XRAY_REGION=us-east-1
-AWS_ACCESS_KEY_ID=<optional-static-key>
-AWS_SECRET_ACCESS_KEY=<optional-static-secret>
-
-# Secrets loader
-SECRET_PROVIDER=env|secret-manager
-```
-
----
-
-## Deployment profiles (`local`, `staging`, `prod`)
-
-Use profile templates from `deploy/profiles/`:
-
-```bash
-cp deploy/profiles/local.env.example .env.local
-cp deploy/profiles/staging.env.example .env.staging
-cp deploy/profiles/prod.env.example .env.prod
-```
-
-Run with a profile env file:
-
-```bash
-# Docker Compose
-docker compose --env-file .env.local up --build
-
-# Direct
-set -a; source .env.staging; set +a
-incident-triage-mcp
-```
-
-Smoke-check all three profile templates locally:
-
-```bash
-./scripts/smoke_profiles.sh
-```
-
-Profile guardrails enforced by config:
-
-| Profile | Guardrails |
-|---|---|
-| `local` | Mock providers and file idempotency are allowed for fast dev loops. |
-| `staging` | If `MCP_TRANSPORT=streamable-http`, auth cannot be `none`; provider-specific env vars are validated unless `BUNDLE_ONLY_MODE=true`. |
-| `prod` | `AUDIT_MODE=stdout`; evidence backend cannot be `none`; idempotency backend must be `redis` or `postgres`. Alerts/metrics can stay `mock` only when `BUNDLE_ONLY_MODE=true`. |
-
-Adapter env matrix (validated when selected in `staging`/`prod`):
-
-| Provider | Required env vars |
-|---|---|
-| `datadog` | `DATADOG_API_KEY`, `DATADOG_APP_KEY` |
-| `prometheus` | `PROMETHEUS_BASE_URL` |
-| `pagerduty` | `PAGERDUTY_API_TOKEN` |
-| `opsgenie` | `OPSGENIE_API_KEY` |
-| `elk` | `ELASTICSEARCH_BASE_URL` |
-| `cloudwatch` | Uses AWS auth chain (or `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY`) |
-| `xray` | Uses AWS auth chain (or `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY`) |
-
-Ticket provider env matrix (validated when selected in `staging`/`prod`):
-
-| Provider (`JIRA_PROVIDER`) | Required env vars |
-|---|---|
-| `cloud` | `JIRA_BASE_URL`, `JIRA_EMAIL`, `JIRA_API_TOKEN` |
-| `servicenow` | `SERVICENOW_BASE_URL`, `SERVICENOW_USERNAME`, `SERVICENOW_PASSWORD` |
-
----
-
-## Prod Mode (deployment checklist)
-
-Use `DEPLOYMENT_PROFILE=prod` with `deploy/profiles/prod.env.example` as your baseline.
-
-1) Prepare production env file
-
-```bash
-cp deploy/profiles/prod.env.example .env.prod
-# fill real secrets/hosts (no placeholders)
-```
-
-2) Start with strict prod guardrails enabled
-
-```bash
-set -a; source .env.prod; set +a
-incident-triage-mcp
-```
-
-The process will fail fast if prod requirements are not met (for example mock alerts/metrics providers, missing durable idempotency backend, or missing HTTP auth config for streamable HTTP).
-
-3) Verify service telemetry and posture from your MCP client
-
-- `mcp_health()`
-- `mcp_metrics()`
-- `mcp_traces_recent(limit=25)`
-- `jira_create_ticket(incident_id="INC-123", dry_run=true)` (safe action smoke check)
-
-4) Rollout recommendation
-
-- Deploy to staging first with the same providers/secrets model.
-- Keep `dry_run=true` for mutating tools in initial production canaries.
-- Alert on `mcp_metrics().totals.adapter_errors_total` and `mcp_metrics().totals.auth_denied_total`.
-- Alert on `mcp_metrics().tracing.export_errors_total` when OTLP export is enabled.
-
-### Bundle-Only mode (minimal MCP env)
-
-If Airflow is already collecting + normalizing data into Evidence Bundles, you can run MCP in artifact-consumer mode:
-
-- Set `BUNDLE_ONLY_MODE=true`
-- Keep `EVIDENCE_BACKEND=fs|s3` (not `none`)
-- Set `WORKFLOW_BACKEND=airflow` only if MCP should trigger Airflow DAGs
-- Use `WORKFLOW_BACKEND=none` if another system already triggers the workflow
-- MCP disables direct observability fetch tools (`alerts_fetch_active`, `service_health_snapshot`, `logs_fetch_recent`, `traces_fetch_recent`) and relies on bundle tools (`evidence_get_bundle`, `incident_triage_summary`, ticket/notify flows)
-
----
-
-## Adapter onboarding (<30 min)
-
-Use this path to add a new provider with minimal risk.
-
-1) Implement adapter class
-
-- Create `src/incident_triage_mcp/adapters/<provider>_real.py`.
-- Implement the contract methods you need (`fetch_active_alerts`, `health_snapshot`, optional `fetch_logs`, `fetch_traces`).
-
-2) Register provider
-
-- Wire it in `src/incident_triage_mcp/adapters/registry.py` inside `_register_builtin_providers()`.
-
-3) Add provider flag support
-
-- Add provider name to allowed sets in `src/incident_triage_mcp/config.py` (`ALERTS_PROVIDER`, `METRICS_PROVIDER`, etc.).
-- Add required env validation for `staging`/`prod` profile if the provider needs secrets/URLs.
-
-4) Add tests
-
-- Contract tests at registry level (`tests/test_adapter_scaffold.py` style).
-- Provider-specific unit tests with fake HTTP/AWS clients.
-- Tool-path tests in `tests/test_server_tools.py` for success + failure normalization.
-
-5) Document env vars + usage
-
-- Add env vars to `README.md` “Key environment variables”.
-- If provider needs optional SDKs, add/update `pyproject.toml` extras and install instructions.
-- Add one demo call in “Demo flow (agent/host)” if relevant.
-
-Minimal skeleton:
-
-```python
-class NewProviderAPI:
-    def __init__(self, secrets):
-        self.api_key = secrets.get("NEW_PROVIDER_API_KEY", required=True)
-
-    def fetch_active_alerts(self, services, since_minutes, max_alerts):
-        ...
-
-    def health_snapshot(self, service, start_iso, end_iso):
-        ...
-```
-
-Definition of done:
-
-- Provider selectable via env only (no code changes for users).
-- Missing/invalid provider config fails clearly at startup in `staging`/`prod`.
-- Tests pass and `mcp_health()` / `mcp_metrics()` still report expected values.
-
----
-
-## Standalone Mode (No Airflow)
-
-Boot MCP standalone with only stdio + local runbooks:
-
-```bash
 MCP_TRANSPORT=stdio \
-RUNBOOKS_DIR=./runbooks \
 WORKFLOW_BACKEND=none \
 EVIDENCE_BACKEND=fs \
 EVIDENCE_DIR=./evidence \
 incident-triage-mcp
 ```
 
-Offline demo flow (no Airflow required):
-
-1. Seed deterministic evidence:
-   - `evidence_seed_sample(incident_id="INC-123", service="payments-api", window_minutes=30)`
-2. Summarize incident:
-   - `incident_triage_summary(incident_id="INC-123")`
-3. Draft Jira ticket from local evidence:
-   - `jira_draft_ticket(incident_id="INC-123")`
-
-Notes:
-- `airflow_*` tools are registered when `WORKFLOW_BACKEND=airflow` (or legacy `EVIDENCE_BACKEND=airflow`).
-- If `WORKFLOW_BACKEND=airflow` but Airflow env vars are missing, server still starts and Airflow tool calls return a clear `airflow_disabled` error.
-- Recommended new config split:
-  - local offline: `WORKFLOW_BACKEND=none`, `EVIDENCE_BACKEND=fs`
-  - local/prod workflow mode: `WORKFLOW_BACKEND=airflow`, `EVIDENCE_BACKEND=fs|s3`
-
-Quick verification tests:
+### Local agent run (single incident)
 
 ```bash
-# standalone behavior (no airflow required)
-UV_CACHE_DIR=.uv-cache /opt/anaconda3/bin/uv run --project . \
-  python -m unittest tests.test_standalone_mode -v
+incident-triage-agent \
+  --incident-id INC-123 \
+  --service payments-api \
+  --artifact-store fs \
+  --artifact-dir ./evidence \
+  --compact
 ```
 
-One-command standalone smoke check:
+### Docker (streamable-http)
 
 ```bash
-./scripts/smoke_standalone.sh INC-123 payments-api
+docker run --rm -p 3333:3333 \
+  -e MCP_TRANSPORT=streamable-http \
+  -e WORKFLOW_BACKEND=none \
+  -e EVIDENCE_BACKEND=fs \
+  ghcr.io/felixkwasisarpong/incident-triage-mcp:latest
 ```
 
----
-
-## Docker Compose (Airflow + Postgres + MinIO + MCP)
-
-This repo supports a local dev stack where:
-- **Airflow** runs evidence workflows
-- **MinIO (S3-compatible)** stores Evidence Bundles so the setup also works in Kubernetes
-- **MCP server** reads Evidence Bundles from MinIO/S3 (or filesystem in dev mode)
-
-Recommended backend split for this stack:
-- `WORKFLOW_BACKEND=airflow`
-- `EVIDENCE_BACKEND=s3`
-
-### Start
+Optional local stack (Airflow + Postgres + MinIO + MCP):
 
 ```bash
-mkdir -p airflow/dags airflow/artifacts airflow/logs airflow/plugins data runbooks
-
 docker compose up --build
 ```
 
-### Airflow UI
+## Kubernetes: One Agent Job Per Trigger
 
-- URL: `http://localhost:8080`
-- Login: `admin / admin`
+This is the recommended runtime pattern:
 
-### MCP (HTTP)
+1. Incoming trigger (webhook/manual) arrives.
+2. Dispatcher (or operator) creates one Kubernetes `Job` per incident.
+3. Job runs `incident-triage-agent` once and exits.
+4. Agent calls MCP tools over HTTP.
+5. MCP optionally triggers Airflow DAG (`incident_evidence_v1`) and consumes bundle from `fs`/`s3`.
 
-- Default: `http://localhost:3333` (streamable HTTP transport)
-
-> Tip: Claude Desktop usually spawns MCP servers via **stdio**. For Docker/HTTP, you typically use an MCP client that supports HTTP or add a small local stdio→HTTP bridge.
-
-### MinIO (artifact store)
-
-- S3 API: `http://localhost:9000`
-- Console UI: `http://localhost:9001`
-- Credentials (dev): `minioadmin / minioadmin`
-
-Check artifacts:
-
-```bash
-docker run --rm --network incident-triage-mcp_default \
-  -e MC_HOST_local=http://minioadmin:minioadmin@minio:9000 \
-  minio/mc:latest ls local/triage-artifacts/evidence/v1/
-```
-
-Standalone Docker mode (no Airflow, no MinIO):
-
-```bash
-mkdir -p data evidence runbooks
-docker compose --profile standalone up --build incident-triage-mcp-standalone
-```
-
-- MCP endpoint: `http://localhost:3334`
-
----
-
-## Testing
-
-Run all tests:
-
-```bash
-UV_CACHE_DIR=.uv-cache /opt/anaconda3/bin/uv run --project . \
-  python -m unittest discover -s tests -p 'test_*.py' -v
-```
-
-The suite currently covers all MCP tools defined in `src/incident_triage_mcp/server.py`.
-
-Deployment profile smoke checks:
-
-```bash
-./scripts/smoke_profiles.sh
-```
-
----
-
-## Automated Releases
-
-This repo supports automated tag-based release publishing for PyPI, GHCR, and Docker Hub.
-
-Release workflow:
-- Trigger: push a Git tag like `v0.2.0`
-- Publishes:
-  - Python package to PyPI
-  - Multi-arch Docker image (`linux/amd64`, `linux/arm64`) to:
-    - `ghcr.io/<owner>/incident-triage-mcp`
-    - `docker.io/<dockerhub-user>/incident-triage-mcp`
-  - Docker image tags: `X.Y.Z`, `X.Y`, `latest`
-  - Docker Hub repository Overview (synced from `README_PYPI.md`)
-  - GitHub Release with generated notes
-
-Required repository secrets:
-- `PYPI_API_TOKEN` (PyPI API token with publish permission)
-- `DOCKERHUB_USERNAME` (Docker Hub username / namespace)
-- `DOCKERHUB_TOKEN` (Docker Hub access token with write permission)
-
-Release command:
-
-```bash
-# 1) bump version in pyproject.toml first, then:
-git tag v0.2.0
-git push origin v0.2.0
-```
-
-Notes:
-- The workflow validates that tag `vX.Y.Z` matches `project.version` in `pyproject.toml`.
-- GHCR publish uses the built-in `GITHUB_TOKEN`.
-- Docker Hub publish + Overview sync use `DOCKERHUB_USERNAME` / `DOCKERHUB_TOKEN`.
-
----
-
-## MCP Registry Listing
-
-This repo includes official MCP Registry metadata in `server.json`.
-
-Validation/publish commands:
-
-```bash
-# Install mcp-publisher (example: macOS arm64)
-curl -LsSf https://github.com/modelcontextprotocol/registry/releases/latest/download/mcp-publisher_darwin_arm64.tar.gz -o /tmp/mcp-publisher.tgz
-tar -xzf /tmp/mcp-publisher.tgz -C /tmp
-sudo mv /tmp/mcp-publisher /usr/local/bin/mcp-publisher
-
-# Validate + publish
-mcp-publisher validate server.json
-mcp-publisher login github
-mcp-publisher publish
-```
-
-Notes:
-- Server name is `io.github.felixkwasisarpong/incident-triage-mcp`.
-- PyPI verification marker is embedded in this README (`mcp-name: ...`).
-- OCI verification is provided via Docker image label (`io.modelcontextprotocol.server.name`).
-- Catalog icon asset (for Docker MCP registry `server.yaml`) is checked in at `docs/assets/icon.png`.
-- Raw icon URL: `https://raw.githubusercontent.com/felixkwasisarpong/incident-triage-mcp/main/docs/assets/icon.png`
-- Use the matching binary asset for your OS/arch from:
-  `https://github.com/modelcontextprotocol/registry/releases/latest`
-
----
-
-## Evidence Bundle workflow
-
-**Airflow produces** a single artifact per incident:
-
-- `fs: ./airflow/artifacts/<INCIDENT_ID>.json` (dev/local PVC)
-- `s3: s3://triage-artifacts/evidence/v1/<INCIDENT_ID>.json` (Docker/K8s/prod)
-
-The MCP server exposes tools to:
-- trigger evidence DAGs
-- fetch evidence bundles
-- search runbooks
-
-This is the intended flow:
-
-1) Agent/host triggers evidence collection (Airflow DAG via `WORKFLOW_BACKEND=airflow`)
-2) Airflow writes the Evidence Bundle JSON artifact
-2.5) Agent/host optionally calls `evidence.wait_for_bundle` to poll until the artifact exists
-3) Agent/host reads the bundle via MCP tools
-4) Ticket creation + safe actions use the same bundle
-
----
-
-## Demo flow (agent/host)
-
-Typical demo sequence:
-
-0) Check MCP service health/metrics:
-   - `mcp_health()`
-   - `mcp_metrics()`
-   - `mcp_traces_recent(limit=25)`
-   - HTTP checks (streamable-http): `GET /healthz`, `GET /metrics`, `GET /traces?limit=25`
-   - OTLP export status is included in `mcp_metrics().tracing.otlp_export`
-1) Trigger evidence collection (requires `WORKFLOW_BACKEND=airflow`):
-   - `airflow_trigger_incident_dag(incident_id="INC-123", service="payments-api")`
-2) Wait for the Evidence Bundle:
-   - `evidence_wait_for_bundle(incident_id="INC-123", timeout_seconds=90, poll_seconds=2)`
-3) Generate a deterministic triage summary (no LLM required):
-   - `incident_triage_summary(incident_id="INC-123")`
-3.5) Optional log pull for the same window:
-   - `logs_fetch_recent(service="payments-api", start_iso="2026-01-01T00:00:00Z", end_iso="2026-01-01T00:30:00Z", limit=50)`
-3.6) Optional trace pull for the same window:
-   - `traces_fetch_recent(service="payments-api", start_iso="2026-01-01T00:00:00Z", end_iso="2026-01-01T00:30:00Z", limit=25)`
-4) Optional one-call orchestration (safe ticket dry-run hook):
-   - `incident_triage_run(incident_id="INC-123", service="payments-api", include_ticket=true)`
-   - Override project key for the ticket hook: `incident_triage_run(incident_id="INC-123", service="payments-api", include_ticket=true, project_key="PAY")`
-5) Optional notification hook (safe dry-run by default):
-   - Provider-agnostic notify tool: `notify_post_update(incident_id="INC-123", service="payments-api", provider="slack")`
-   - Teams via generic tool: `notify_post_update(incident_id="INC-123", service="payments-api", provider="teams", channel="Incident Triage", dry_run=false)`
-   - `incident_triage_run(incident_id="INC-123", service="payments-api", notify_slack=true)`
-   - Slack live send: `incident_triage_run(incident_id="INC-123", service="payments-api", notify_slack=true, notify_provider="slack", slack_channel="#incident-triage", slack_dry_run=false)`
-   - Teams live send: `incident_triage_run(incident_id="INC-123", service="payments-api", notify_slack=true, notify_provider="teams", slack_channel="Incident Triage", slack_dry_run=false)`
-
----
-
-## Jira ticketing demo
-
-0) Validate ticket provider credentials (`cloud` or `servicenow`):
-   - `jira_validate_credentials()`
-
-1) Discover Jira metadata first (recommended):
-   - `jira_list_projects()`
-   - `jira_list_issue_types()`  # uses `JIRA_PROJECT_KEY` default
-   - `jira_list_issue_types(project_key="SCRUM")`
-
-2) Draft a ticket (no credentials required, uses `JIRA_PROJECT_KEY` by default):
-   - `jira_draft_ticket(incident_id="INC-123")`
-   - Override project key per call: `jira_draft_ticket(incident_id="INC-123", project_key="PAY")`
-
-3) Safe create (mock provider by default):
-   - Dry run (default):
-     - `jira_create_ticket(incident_id="INC-123")`
-     - Override project key per call: `jira_create_ticket(incident_id="INC-123", project_key="PAY")`
-   - Create (requires explicit approval inputs):
-     - `jira_create_ticket(incident_id="INC-123", dry_run=false, reason="Track incident timeline and coordinate responders", confirm_token="CHANGE_ME_12345", idempotency_key="INC-123-PAY-1")`
-
-Notes:
-- Non-dry-run is blocked unless **RBAC** allows it (`MCP_ROLE=responder|admin`) and `CONFIRM_TOKEN` is provided.
-- Non-dry-run `jira_create_ticket` also requires `idempotency_key` (prevents duplicate tickets on retries).
-- Approval tokens support single and rotated forms:
-  - `CONFIRM_TOKEN` (legacy single token)
-  - `CONFIRM_TOKENS` (comma-separated tokens)
-  - `CONFIRM_TOKEN_SHA256` / `CONFIRM_TOKENS_SHA256` (sha256 digests instead of plaintext)
-- Non-dry-run Slack posts are RBAC-gated (`slack.post_update`, allowed for `MCP_ROLE=responder|admin`).
-- Non-dry-run Teams posts are RBAC-gated (`teams.post_update`, allowed for `MCP_ROLE=responder|admin`).
-- Swap providers via env: `JIRA_PROVIDER=mock` (demo), `JIRA_PROVIDER=cloud` (real Jira Cloud), or `JIRA_PROVIDER=servicenow` (real ServiceNow).
-- `JIRA_ISSUE_TYPE` defaults to `Task` (used for creates unless overridden in code).
-- Jira Cloud descriptions are sent as ADF and render section headers/bullets/inline formatting in the Jira UI.
-- ServiceNow creates records in `/api/now/table/incident` by default (override with `SERVICENOW_TABLE`).
-- Reusing the same `idempotency_key` on non-dry-run `jira_create_ticket` returns the existing issue instead of creating a duplicate.
-
-## Runbooks (local Markdown)
-
-Put Markdown runbooks in:
-
-- `./runbooks/*.md`
-
-Then use the MCP tool (example):
-
-- `runbooks_search(query="5xx latency timeout", limit=5)`
-
----
-
-## Kubernetes (local or remote)
-
-You can deploy the MCP server into Kubernetes (local via **kind/minikube** or remote like EKS/GKE/AKS).
-
-### Local Kubernetes with kind (example)
-
-```bash
-brew install kind kubectl
-kind create cluster --name triage
-
-# build image
-docker build -t incident-triage-mcp:0.1.0 .
-
-# load into kind
-kind load docker-image incident-triage-mcp:0.1.0 --name triage
-
-# update k8s/deployment.yaml to use image: incident-triage-mcp:0.1.0
-kubectl apply -f k8s/
-
-kubectl port-forward svc/incident-triage-mcp 3333:80
-```
-
-Now the MCP service is reachable at `http://localhost:3333`.
-
-> Note: In Kubernetes, `AUDIT_MODE=stdout` is recommended so log collectors can capture audit events.
-
-> If MinIO is running in Docker on your Mac and MCP is running in kind, set `S3_ENDPOINT_URL` to `http://host.docker.internal:9000` in the Kubernetes Deployment.
-
-### Helm chart quickstart
-
-Install from the local chart scaffold:
+### Deploy MCP server (Helm)
 
 ```bash
 helm upgrade --install incident-triage-mcp ./charts/incident-triage-mcp \
   --namespace incident-triage --create-namespace \
   --set image.repository=ghcr.io/felixkwasisarpong/incident-triage-mcp \
-  --set image.tag=0.2.6 \
-  --set env.DEPLOYMENT_PROFILE=staging \
+  --set image.tag=0.2.8 \
   --set env.MCP_TRANSPORT=streamable-http \
+  --set env.MCP_HTTP_AUTH_MODE=api_key \
   --set secretEnv.MCP_HTTP_API_KEY=change-me
 ```
 
-Useful overrides:
+### Trigger one incident with a single-run agent Job
 
-- `values.yaml` `env` map for non-secret runtime settings.
-- `values.yaml` `secretEnv` map for quickstart secrets (use external secrets in production).
-- `values.yaml` `extraEnv` list for advanced `valueFrom` entries.
+```bash
+kubectl -n incident-triage create job triage-inc-123 \
+  --image=ghcr.io/felixkwasisarpong/incident-triage-mcp:0.2.8 \
+  -- incident-triage-agent \
+  --incident-id INC-123 \
+  --service payments-api \
+  --mcp-url http://incident-triage-mcp/mcp \
+  --mcp-api-key change-me \
+  --compact
+```
 
----
+### Ensure single-run behavior
 
-## Status and Next Steps
+- Use deterministic job names per incident (`triage-inc-<incident_id>`).
+- Reject duplicates at dispatcher level if job already exists.
+- Keep ticket creates idempotent with `idempotency_key`.
+- Configure Job lifecycle controls (`backoffLimit`, `activeDeadlineSeconds`, `ttlSecondsAfterFinished`).
 
-### Implemented
+## Configuration Essentials
 
-- ✅ Ticketing: Jira draft + gated create (mock/cloud/ServiceNow), idempotent create, Jira discovery tools, ADF formatting
-- ✅ Artifact backends: filesystem + S3/MinIO (Docker/K8s-friendly)
-- ✅ Deployment profiles (`local`/`staging`/`prod`) with guardrails and env templates
-- ✅ Built-in MCP observability tools (`mcp_health`, `mcp_metrics`, `mcp_traces_recent`, `/healthz`, `/metrics`, `/traces`)
-- ✅ Helm chart + GitHub Actions for build/publish workflows
-- ✅ Airflow 3 API support (`/api/v2` + token auth) and networked agent -> MCP -> Airflow flow
-- ✅ MCP backend split: `WORKFLOW_BACKEND` (orchestration) vs `EVIDENCE_BACKEND` (storage/read path)
-- ✅ Safe actions baseline: RBAC + confirm tokens + audit + idempotent ticket creates
+| Variable | Meaning |
+|---|---|
+| `MCP_TRANSPORT` | `stdio` or `streamable-http` |
+| `WORKFLOW_BACKEND` | `none` or `airflow` |
+| `EVIDENCE_BACKEND` | `none`, `fs`, `s3`, `airflow` |
+| `EVIDENCE_DIR` | Local bundle directory when using `fs` |
+| `AIRFLOW_BASE_URL` | Required for Airflow trigger/read tools |
+| `MCP_HTTP_AUTH_MODE` | `none`, `api_key`, `jwt_hs256` |
+| `AUDIT_MODE` | `stdout` (recommended in k8s) or `file` |
+| `DEPLOYMENT_PROFILE` | `local`, `staging`, `prod` |
 
+Profile templates live in `deploy/profiles/`:
 
----
+- `local.env.example`
+- `staging.env.example`
+- `prod.env.example`
+
+## Testing
+
+Run full tests:
+
+```bash
+pytest -q
+```
+
+Run contract checks only:
+
+```bash
+pytest -q tests/test_contract_evidence_bundle.py tests/test_contract_mcp_tools.py
+python scripts/validate_contrib.py
+```
+
+## Releases
+
+### Install from PyPI
+
+```bash
+pip install incident-triage-mcp==X.Y.Z
+```
+
+### Pull container image
+
+```bash
+docker pull ghcr.io/felixkwasisarpong/incident-triage-mcp:X.Y.Z
+```
+
+Supported image tags:
+
+- `X.Y.Z` (exact)
+- `X.Y` (minor stream)
+- `latest`
+
+For release workflow details, see [docs/RELEASING.md](docs/RELEASING.md).
+
+## Project Layout
+
+```text
+incident-triage-mcp/
+  src/incident_triage_mcp/      # MCP server + tools + adapters
+  spec/                         # versioned contracts
+  airflow/dags/                 # evidence pipeline
+  charts/incident-triage-mcp/   # Helm chart
+  k8s/                          # Kubernetes manifests
+  contrib/                      # polyglot contribution area
+  docs/                         # architecture, release, governance docs
+```
+
+## Support And Triage
+
+- Discussions: https://github.com/felixkwasisarpong/incident-triage-mcp/discussions
+- Issues: https://github.com/felixkwasisarpong/incident-triage-mcp/issues
+- Security reports: [SECURITY.md](SECURITY.md)
+
+## Documentation Index
+
+- [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
+- [docs/CONTRIBUTION_GUIDE.md](docs/CONTRIBUTION_GUIDE.md)
+- [docs/REPO_LAYOUT.md](docs/REPO_LAYOUT.md)
+- [docs/VERSIONING.md](docs/VERSIONING.md)
+- [docs/RELEASING.md](docs/RELEASING.md)
+- [docs/MAINTAINERS_RUNBOOK.md](docs/MAINTAINERS_RUNBOOK.md)
 
 ## Contributing
 
-PRs welcome. If you add an integration, prefer this pattern:
-
-- define a provider contract (interface)
-- implement `mock` + `real`
-- select via env vars (no code changes for users)
-
----
+Read [CONTRIBUTING.md](CONTRIBUTING.md) before opening a PR.
 
 ## License
 
