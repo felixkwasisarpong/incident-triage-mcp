@@ -42,6 +42,17 @@ ruff check src tests
 pytest -q
 ```
 
+## Contract Checks
+
+Contract safety checks are run in `.github/workflows/contracts.yml` for pull requests and pushes to `main`.
+
+Run locally before opening a PR:
+
+```bash
+pytest -k contract -q
+python scripts/validate_contrib.py
+```
+
 ## Labels and Triage
 
 Issues and PRs use label groups in `.github/labels.yml`:
