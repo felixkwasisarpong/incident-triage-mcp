@@ -16,6 +16,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Setup Python
         uses: actions/setup-python@v5
@@ -42,28 +44,39 @@ jobs:
           import subprocess
           import sys
 
+          def _diff_name_only(rev: str):
+              try:
+                  out = subprocess.check_output(
+                      ["git", "diff", "--name-only", rev],
+                      text=True,
+                  )
+              except subprocess.CalledProcessError:
+                  return None
+              return out.splitlines()
+
           event_name = os.getenv("GITHUB_EVENT_NAME", "")
           files = []
 
           if event_name == "pull_request":
               base_ref = os.getenv("GITHUB_BASE_REF", "main")
               subprocess.run(
-                  ["git", "fetch", "--no-tags", "--depth=1", "origin", base_ref],
+                  ["git", "fetch", "--no-tags", "origin", base_ref],
                   check=True,
               )
-              diff = subprocess.check_output(
-                  ["git", "diff", "--name-only", f"origin/{base_ref}...HEAD"],
-                  text=True,
-              )
-              files = diff.splitlines()
+              files = _diff_name_only(f"origin/{base_ref}...HEAD")
+              if files is None:
+                  # Fallback for edge cases with no merge base available.
+                  files = _diff_name_only(f"origin/{base_ref}..HEAD")
+              if files is None:
+                  raise RuntimeError("Unable to compute changed files against base branch")
           else:
               before = os.getenv("GITHUB_EVENT_BEFORE", "")
               if before and set(before) != {"0"}:
-                  diff = subprocess.check_output(
-                      ["git", "diff", "--name-only", f"{before}...HEAD"],
-                      text=True,
-                  )
-                  files = diff.splitlines()
+                  files = _diff_name_only(f"{before}...HEAD")
+                  if files is None:
+                      files = _diff_name_only(f"{before}..HEAD")
+                  if files is None:
+                      raise RuntimeError("Unable to compute changed files for push event")
               else:
                   changed = subprocess.check_output(
                       ["git", "show", "--name-only", "--pretty=", "HEAD"],
