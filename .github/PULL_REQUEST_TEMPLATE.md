@@ -1,10 +1,14 @@
-## Summary
+## What changed
 
 <!-- What changed? Keep it brief and concrete. -->
 
 ## Why
 
 <!-- Why is this needed? Link issue(s) if possible. -->
+
+## How tested
+
+<!-- Commands run and key results. -->
 
 ## Type of Change
 
@@ -20,6 +24,7 @@
 - [ ] `pytest -q` ran successfully
 - [ ] Added/updated tests for changed behavior
 - [ ] Added/updated docs for changed behavior
+- [ ] No secrets, tokens, or credentials added to this PR
 
 ## Compatibility and Safety Checklist
 
