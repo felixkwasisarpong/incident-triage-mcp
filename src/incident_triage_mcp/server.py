@@ -30,7 +30,11 @@ from incident_triage_mcp.adapters.teams_webhook import (
 from incident_triage_mcp.audit import AuditLog
 from incident_triage_mcp.config import ConfigError, load_config
 from incident_triage_mcp.domain_models import EvidenceBundle
-from incident_triage_mcp.policy.http_auth import HTTPAuthError, verify_api_key, verify_jwt_from_headers
+from incident_triage_mcp.policy.http_auth import (
+    HTTPAuthError,
+    verify_api_key,
+    verify_jwt_from_headers,
+)
 from incident_triage_mcp.policy.rbac import require_allowed, role
 from incident_triage_mcp.policy.safe_actions import SafeActionContext, enforce, SafeActionError
 from incident_triage_mcp.telemetry import ServiceTelemetry
@@ -656,11 +660,8 @@ def _jira_issue_type() -> str:
 
 def _notify_provider(provider: str | None = None) -> str:
     resolved = (
-        provider
-        or os.getenv("NOTIFY_PROVIDER")
-        or CFG.notify_provider
-        or "slack"
-    ).strip().lower()
+        (provider or os.getenv("NOTIFY_PROVIDER") or CFG.notify_provider or "slack").strip().lower()
+    )
     if resolved in {"slack", "teams"}:
         return resolved
     return "slack"
@@ -810,7 +811,9 @@ def incident_triage_run(
                 "provider": target,
             }
         result["notify"] = notify_result
-        notify_key = "teams" if str(notify_result.get("provider") or target).lower() == "teams" else "slack"
+        notify_key = (
+            "teams" if str(notify_result.get("provider") or target).lower() == "teams" else "slack"
+        )
         result[notify_key] = notify_result
 
     result["correlation_id"] = corr
@@ -819,7 +822,9 @@ def incident_triage_run(
 
 @mcp.tool()
 @_instrumented_tool("alerts_fetch_active")
-def alerts_fetch_active(services: list[str] = None, since_minutes: int = 30, max_alerts: int = 50) -> dict:
+def alerts_fetch_active(
+    services: list[str] = None, since_minutes: int = 30, max_alerts: int = 50
+) -> dict:
     meta, request_id = _tool_request_meta("alerts.fetch_active")
     services = services or []
     args = {"services": services, "since_minutes": since_minutes, "max_alerts": max_alerts}
@@ -858,7 +863,9 @@ def alerts_fetch_active(services: list[str] = None, since_minutes: int = 30, max
 def service_health_snapshot(service: str, start_iso: str, end_iso: str) -> dict:
     meta, request_id = _tool_request_meta("service.health_snapshot")
     args = {"service": service, "start_iso": start_iso, "end_iso": end_iso}
-    corr = audit.write("service.health_snapshot", args, ok=True, meta=meta, correlation_id=request_id)
+    corr = audit.write(
+        "service.health_snapshot", args, ok=True, meta=meta, correlation_id=request_id
+    )
 
     if CFG.bundle_only_mode:
         err = _observability_disabled_error("health_snapshot")
@@ -1045,7 +1052,9 @@ def slack_post_update(
     """
     meta, request_id = _tool_request_meta("slack.post_update")
     resolved_channel = (channel or os.getenv("SLACK_DEFAULT_CHANNEL") or "").strip() or None
-    message = text or _build_slack_message(incident_id=incident_id, service=service, summary=summary, ticket=ticket)
+    message = text or _build_slack_message(
+        incident_id=incident_id, service=service, summary=summary, ticket=ticket
+    )
     payload = {"text": message}
     if resolved_channel:
         payload["channel"] = resolved_channel
@@ -1104,7 +1113,11 @@ def slack_post_update(
         r = requests.post(webhook, json=payload, timeout=15)
         r.raise_for_status()
         # Return thread_ts so callers can chain follow-up replies in the same thread.
-        response_ts = r.json().get("ts") if r.headers.get("Content-Type", "").startswith("application/json") else None
+        response_ts = (
+            r.json().get("ts")
+            if r.headers.get("Content-Type", "").startswith("application/json")
+            else None
+        )
         return {
             "correlation_id": corr,
             "posted": True,
@@ -1141,7 +1154,9 @@ def teams_post_update(
     """
     meta, request_id = _tool_request_meta("teams.post_update")
     resolved_channel = (channel or os.getenv("TEAMS_DEFAULT_CHANNEL") or "").strip() or None
-    message = text or _build_slack_message(incident_id=incident_id, service=service, summary=summary, ticket=ticket)
+    message = text or _build_slack_message(
+        incident_id=incident_id, service=service, summary=summary, ticket=ticket
+    )
     payload = build_teams_message_card(
         title=f"Incident Update {incident_id}",
         message=message,
@@ -1356,7 +1371,10 @@ def evidence_get_bundle(incident_id: str) -> dict:
         if fallback is None:
             fallback = out
 
-    fallback = fallback or {"found": False, "path": str(Path(_primary_evidence_dir()) / f"{incident_id}.json")}
+    fallback = fallback or {
+        "found": False,
+        "path": str(Path(_primary_evidence_dir()) / f"{incident_id}.json"),
+    }
     fallback["correlation_id"] = corr
     fallback["backend"] = backend
     return fallback
@@ -1364,11 +1382,17 @@ def evidence_get_bundle(incident_id: str) -> dict:
 
 @mcp.tool()
 @_instrumented_tool("evidence_wait_for_bundle")
-def evidence_wait_for_bundle(incident_id: str, timeout_seconds: int = 30, poll_seconds: int = 2) -> dict:
+def evidence_wait_for_bundle(
+    incident_id: str, timeout_seconds: int = 30, poll_seconds: int = 2
+) -> dict:
     meta, request_id = _tool_request_meta("evidence.wait_for_bundle")
     corr = audit.write(
         "evidence.wait_for_bundle",
-        {"incident_id": incident_id, "timeout_seconds": timeout_seconds, "poll_seconds": poll_seconds},
+        {
+            "incident_id": incident_id,
+            "timeout_seconds": timeout_seconds,
+            "poll_seconds": poll_seconds,
+        },
         ok=True,
         meta=meta,
         correlation_id=request_id,
@@ -1608,8 +1632,16 @@ def jira_create_ticket(
             )
         )
     except SafeActionError as e:
-        audit.write("jira.create_ticket.denied", {"correlation_id": corr, "error": str(e)}, ok=False)
-        return {"correlation_id": corr, "created": False, "dry_run": dry_run, "error": str(e), "draft": draft}
+        audit.write(
+            "jira.create_ticket.denied", {"correlation_id": corr, "error": str(e)}, ok=False
+        )
+        return {
+            "correlation_id": corr,
+            "created": False,
+            "dry_run": dry_run,
+            "error": str(e),
+            "draft": draft,
+        }
 
     if dry_run:
         return {"correlation_id": corr, "created": False, "dry_run": True, "draft": draft}
@@ -1644,7 +1676,9 @@ def jira_create_ticket(
         "jira.create_ticket.created",
         {
             "correlation_id": corr,
-            "result": {k: result.get(k) for k in ["created", "issue_key", "browse_url", "provider"]},
+            "result": {
+                k: result.get(k) for k in ["created", "issue_key", "browse_url", "provider"]
+            },
         },
         ok=True,
     )
@@ -1669,7 +1703,13 @@ def jira_list_projects() -> dict:
         return {"correlation_id": corr, "ok": True, "provider": provider, "projects": projects}
     except Exception as e:
         audit.write("jira.list_projects.error", {"error": str(e)}, ok=False)
-        return {"correlation_id": corr, "ok": False, "provider": provider, "projects": [], "error": str(e)}
+        return {
+            "correlation_id": corr,
+            "ok": False,
+            "provider": provider,
+            "projects": [],
+            "error": str(e),
+        }
 
 
 @mcp.tool()
@@ -1777,13 +1817,23 @@ def jira_add_comment(
         return {"correlation_id": corr, "added": False, "dry_run": dry_run, "error": str(e)}
 
     if dry_run:
-        return {"correlation_id": corr, "added": False, "dry_run": True, "issue_key": issue_key, "body_md": body_md}
+        return {
+            "correlation_id": corr,
+            "added": False,
+            "dry_run": True,
+            "issue_key": issue_key,
+            "body_md": body_md,
+        }
 
     try:
         result = get_provider().add_comment(issue_key, body_md)
         audit.write(
             "jira.add_comment.added",
-            {"correlation_id": corr, "issue_key": issue_key, "comment_id": result.get("comment_id")},
+            {
+                "correlation_id": corr,
+                "issue_key": issue_key,
+                "comment_id": result.get("comment_id"),
+            },
             ok=True,
         )
         return {"correlation_id": corr, "dry_run": False, **result}
@@ -1809,7 +1859,12 @@ def jira_transition_issue(
     meta, request_id = _tool_request_meta("jira.transition_issue")
     corr = audit.write(
         "jira.transition_issue.request",
-        {"issue_key": issue_key, "transition_name": transition_name, "dry_run": dry_run, "provider": provider_name()},
+        {
+            "issue_key": issue_key,
+            "transition_name": transition_name,
+            "dry_run": dry_run,
+            "provider": provider_name(),
+        },
         ok=True,
         meta=meta,
         correlation_id=request_id,
@@ -1829,7 +1884,9 @@ def jira_transition_issue(
             )
         )
     except SafeActionError as e:
-        audit.write("jira.transition_issue.denied", {"correlation_id": corr, "error": str(e)}, ok=False)
+        audit.write(
+            "jira.transition_issue.denied", {"correlation_id": corr, "error": str(e)}, ok=False
+        )
         return {"correlation_id": corr, "transitioned": False, "dry_run": dry_run, "error": str(e)}
 
     if dry_run:
@@ -1850,7 +1907,9 @@ def jira_transition_issue(
         )
         return {"correlation_id": corr, "dry_run": False, **result}
     except Exception as e:
-        audit.write("jira.transition_issue.error", {"correlation_id": corr, "error": str(e)}, ok=False)
+        audit.write(
+            "jira.transition_issue.error", {"correlation_id": corr, "error": str(e)}, ok=False
+        )
         return {"correlation_id": corr, "transitioned": False, "dry_run": False, "error": str(e)}
 
 
@@ -1892,11 +1951,20 @@ def pd_acknowledge_alert(
             )
         )
     except SafeActionError as e:
-        audit.write("pagerduty.acknowledge_alert.denied", {"correlation_id": corr, "error": str(e)}, ok=False)
+        audit.write(
+            "pagerduty.acknowledge_alert.denied",
+            {"correlation_id": corr, "error": str(e)},
+            ok=False,
+        )
         return {"correlation_id": corr, "acknowledged": False, "dry_run": dry_run, "error": str(e)}
 
     if dry_run:
-        return {"correlation_id": corr, "acknowledged": False, "dry_run": True, "incident_id": incident_id}
+        return {
+            "correlation_id": corr,
+            "acknowledged": False,
+            "dry_run": True,
+            "incident_id": incident_id,
+        }
 
     try:
         secrets = get_secrets_loader()
@@ -1909,7 +1977,9 @@ def pd_acknowledge_alert(
         )
         return {"correlation_id": corr, "dry_run": False, **result}
     except Exception as e:
-        audit.write("pagerduty.acknowledge_alert.error", {"correlation_id": corr, "error": str(e)}, ok=False)
+        audit.write(
+            "pagerduty.acknowledge_alert.error", {"correlation_id": corr, "error": str(e)}, ok=False
+        )
         return {"correlation_id": corr, "acknowledged": False, "dry_run": False, "error": str(e)}
 
 
@@ -1951,11 +2021,18 @@ def pd_resolve_alert(
             )
         )
     except SafeActionError as e:
-        audit.write("pagerduty.resolve_alert.denied", {"correlation_id": corr, "error": str(e)}, ok=False)
+        audit.write(
+            "pagerduty.resolve_alert.denied", {"correlation_id": corr, "error": str(e)}, ok=False
+        )
         return {"correlation_id": corr, "resolved": False, "dry_run": dry_run, "error": str(e)}
 
     if dry_run:
-        return {"correlation_id": corr, "resolved": False, "dry_run": True, "incident_id": incident_id}
+        return {
+            "correlation_id": corr,
+            "resolved": False,
+            "dry_run": True,
+            "incident_id": incident_id,
+        }
 
     try:
         secrets = get_secrets_loader()
@@ -1968,7 +2045,9 @@ def pd_resolve_alert(
         )
         return {"correlation_id": corr, "dry_run": False, **result}
     except Exception as e:
-        audit.write("pagerduty.resolve_alert.error", {"correlation_id": corr, "error": str(e)}, ok=False)
+        audit.write(
+            "pagerduty.resolve_alert.error", {"correlation_id": corr, "error": str(e)}, ok=False
+        )
         return {"correlation_id": corr, "resolved": False, "dry_run": False, "error": str(e)}
 
 
@@ -2010,11 +2089,18 @@ def opsgenie_acknowledge_alert(
             )
         )
     except SafeActionError as e:
-        audit.write("opsgenie.acknowledge_alert.denied", {"correlation_id": corr, "error": str(e)}, ok=False)
+        audit.write(
+            "opsgenie.acknowledge_alert.denied", {"correlation_id": corr, "error": str(e)}, ok=False
+        )
         return {"correlation_id": corr, "acknowledged": False, "dry_run": dry_run, "error": str(e)}
 
     if dry_run:
-        return {"correlation_id": corr, "acknowledged": False, "dry_run": True, "alert_id": alert_id}
+        return {
+            "correlation_id": corr,
+            "acknowledged": False,
+            "dry_run": True,
+            "alert_id": alert_id,
+        }
 
     try:
         secrets = get_secrets_loader()
@@ -2027,7 +2113,9 @@ def opsgenie_acknowledge_alert(
         )
         return {"correlation_id": corr, "dry_run": False, **result}
     except Exception as e:
-        audit.write("opsgenie.acknowledge_alert.error", {"correlation_id": corr, "error": str(e)}, ok=False)
+        audit.write(
+            "opsgenie.acknowledge_alert.error", {"correlation_id": corr, "error": str(e)}, ok=False
+        )
         return {"correlation_id": corr, "acknowledged": False, "dry_run": False, "error": str(e)}
 
 
@@ -2070,7 +2158,9 @@ def opsgenie_close_alert(
             )
         )
     except SafeActionError as e:
-        audit.write("opsgenie.close_alert.denied", {"correlation_id": corr, "error": str(e)}, ok=False)
+        audit.write(
+            "opsgenie.close_alert.denied", {"correlation_id": corr, "error": str(e)}, ok=False
+        )
         return {"correlation_id": corr, "closed": False, "dry_run": dry_run, "error": str(e)}
 
     if dry_run:
@@ -2087,7 +2177,9 @@ def opsgenie_close_alert(
         )
         return {"correlation_id": corr, "dry_run": False, **result}
     except Exception as e:
-        audit.write("opsgenie.close_alert.error", {"correlation_id": corr, "error": str(e)}, ok=False)
+        audit.write(
+            "opsgenie.close_alert.error", {"correlation_id": corr, "error": str(e)}, ok=False
+        )
         return {"correlation_id": corr, "closed": False, "dry_run": False, "error": str(e)}
 
 

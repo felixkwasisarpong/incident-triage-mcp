@@ -21,9 +21,7 @@ class ServiceNowProvider:
         if not self.password:
             missing.append("SERVICENOW_PASSWORD")
         if missing:
-            raise RuntimeError(
-                "ServiceNow provider requires " + ", ".join(missing)
-            )
+            raise RuntimeError("ServiceNow provider requires " + ", ".join(missing))
 
     def _url(self, path: str) -> str:
         return f"{self.base_url}{path}"
@@ -77,9 +75,7 @@ class ServiceNowProvider:
         sys_id = str(result.get("sys_id") or "").strip()
         issue_key = number or sys_id or None
         browse_url = (
-            self._url(f"/nav_to.do?uri={self.table}.do?sys_id={sys_id}")
-            if sys_id
-            else None
+            self._url(f"/nav_to.do?uri={self.table}.do?sys_id={sys_id}") if sys_id else None
         )
         return {
             "created": True,

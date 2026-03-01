@@ -33,8 +33,10 @@ class TestJiraCloudTransition(unittest.TestCase):
         post_response = MagicMock()
         post_response.json.return_value = {}
 
-        with patch("requests.get", return_value=get_response), \
-             patch("requests.post", return_value=post_response) as mock_post:
+        with (
+            patch("requests.get", return_value=get_response),
+            patch("requests.post", return_value=post_response) as mock_post,
+        ):
             result = provider.transition_issue("INC-42", "In Progress")
 
         mock_post.assert_called_once()
@@ -47,13 +49,13 @@ class TestJiraCloudTransition(unittest.TestCase):
     def test_transition_case_insensitive(self) -> None:
         provider = self._provider()
         get_response = MagicMock()
-        get_response.json.return_value = {
-            "transitions": [{"id": "31", "name": "Done"}]
-        }
+        get_response.json.return_value = {"transitions": [{"id": "31", "name": "Done"}]}
         post_response = MagicMock()
 
-        with patch("requests.get", return_value=get_response), \
-             patch("requests.post", return_value=post_response):
+        with (
+            patch("requests.get", return_value=get_response),
+            patch("requests.post", return_value=post_response),
+        ):
             result = provider.transition_issue("INC-42", "done")
 
         assert result["transitioned"] is True
@@ -61,9 +63,7 @@ class TestJiraCloudTransition(unittest.TestCase):
     def test_transition_unknown_name_raises(self) -> None:
         provider = self._provider()
         get_response = MagicMock()
-        get_response.json.return_value = {
-            "transitions": [{"id": "11", "name": "To Do"}]
-        }
+        get_response.json.return_value = {"transitions": [{"id": "11", "name": "To Do"}]}
 
         with patch("requests.get", return_value=get_response):
             with self.assertRaises(RuntimeError) as ctx:

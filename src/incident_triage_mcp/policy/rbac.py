@@ -1,8 +1,10 @@
 from __future__ import annotations
 import os
 
+
 class RBACError(RuntimeError):
     pass
+
 
 # simplest roles for now
 ROLE = os.getenv("MCP_ROLE", "viewer").lower()
@@ -25,8 +27,10 @@ ROLE_ALLOW = {
     "admin": {"*"},
 }
 
+
 def role() -> str:
     return ROLE
+
 
 def require_allowed(tool_name: str) -> None:
     allow = ROLE_ALLOW.get(ROLE, set())

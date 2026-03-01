@@ -84,11 +84,17 @@ class TestPdAcknowledgeToolDryRun(unittest.TestCase):
             fastmcp_module = types.ModuleType("mcp.server.fastmcp")
 
             class FastMCP:
-                def __init__(self, *a, **kw): pass
+                def __init__(self, *a, **kw):
+                    pass
+
                 def tool(self):
-                    def d(fn): return fn
+                    def d(fn):
+                        return fn
+
                     return d
-                def run(self, transport="stdio"): return None
+
+                def run(self, transport="stdio"):
+                    return None
 
             fastmcp_module.FastMCP = FastMCP
             server_module.fastmcp = fastmcp_module
@@ -98,10 +104,13 @@ class TestPdAcknowledgeToolDryRun(unittest.TestCase):
             sys.modules["mcp.server.fastmcp"] = fastmcp_module
 
         import os
+
         os.environ["MCP_ROLE"] = "admin"
         import incident_triage_mcp.policy.rbac as rbac
+
         importlib.reload(rbac)
         import incident_triage_mcp.server as server
+
         importlib.reload(server)
 
         with patch("requests.put") as mock_put:

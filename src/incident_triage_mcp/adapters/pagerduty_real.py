@@ -14,7 +14,9 @@ class PagerDutyAPI:
         self._secrets = secrets
 
     def _base_url(self) -> str:
-        raw = (self._secrets.get("PAGERDUTY_BASE_URL", default="https://api.pagerduty.com") or "").strip()
+        raw = (
+            self._secrets.get("PAGERDUTY_BASE_URL", default="https://api.pagerduty.com") or ""
+        ).strip()
         if not raw:
             raise RuntimeError("PagerDuty provider misconfigured: missing PAGERDUTY_BASE_URL")
         if not raw.startswith(("http://", "https://")):
@@ -131,7 +133,9 @@ class PagerDutyAPI:
             if service_lookup and service_name.lower() not in service_lookup:
                 continue
 
-            started_at = self._parse_dt(incident.get("created_at")) or self._parse_dt(incident.get("last_status_change_at"))
+            started_at = self._parse_dt(incident.get("created_at")) or self._parse_dt(
+                incident.get("last_status_change_at")
+            )
             if started_at and started_at < cutoff:
                 continue
             started_at_iso = (started_at or cutoff).isoformat()

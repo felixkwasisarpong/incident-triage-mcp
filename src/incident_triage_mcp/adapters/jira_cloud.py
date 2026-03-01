@@ -36,10 +36,7 @@ def _heading_node(text: str, level: int = 2) -> Dict[str, Any]:
 def _bullet_list_node(items: list[str]) -> Dict[str, Any]:
     return {
         "type": "bulletList",
-        "content": [
-            {"type": "listItem", "content": [_paragraph_node(item)]}
-            for item in items
-        ],
+        "content": [{"type": "listItem", "content": [_paragraph_node(item)]} for item in items],
     }
 
 
@@ -85,7 +82,9 @@ class JiraCloudProvider:
         self.email = os.getenv("JIRA_EMAIL")
         self.api_token = os.getenv("JIRA_API_TOKEN")
         if not self.base_url or not self.email or not self.api_token:
-            raise RuntimeError("JiraCloudProvider requires JIRA_BASE_URL, JIRA_EMAIL, JIRA_API_TOKEN")
+            raise RuntimeError(
+                "JiraCloudProvider requires JIRA_BASE_URL, JIRA_EMAIL, JIRA_API_TOKEN"
+            )
 
     def create_issue(self, payload: Dict[str, Any]) -> Dict[str, Any]:
         url = self.base_url.rstrip("/") + "/rest/api/3/issue"
@@ -183,8 +182,7 @@ class JiraCloudProvider:
         if match is None:
             available = [t.get("name") for t in transitions]
             raise RuntimeError(
-                f"Transition '{transition_name}' not found for {issue_key}. "
-                f"Available: {available}"
+                f"Transition '{transition_name}' not found for {issue_key}. Available: {available}"
             )
 
         r = requests.post(
@@ -205,13 +203,15 @@ class JiraCloudProvider:
         issue_types: list[Dict[str, Any]] = []
 
         # Preferred endpoint in modern Jira Cloud.
-        primary_url = self.base_url.rstrip("/") + f"/rest/api/3/issue/createmeta/{project_key}/issuetypes"
+        primary_url = (
+            self.base_url.rstrip("/") + f"/rest/api/3/issue/createmeta/{project_key}/issuetypes"
+        )
         r = requests.get(primary_url, auth=auth, timeout=20)
         if r.status_code != 404:
             r.raise_for_status()
             data = r.json()
             values = data.get("values") if isinstance(data, dict) else data
-            for it in (values or []):
+            for it in values or []:
                 issue_types.append(
                     {
                         "id": it.get("id"),
@@ -234,7 +234,7 @@ class JiraCloudProvider:
         data = r.json()
         projects = data.get("projects") or []
         project = projects[0] if projects else {}
-        for it in (project.get("issuetypes") or []):
+        for it in project.get("issuetypes") or []:
             issue_types.append(
                 {
                     "id": it.get("id"),

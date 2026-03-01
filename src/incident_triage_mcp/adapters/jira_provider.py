@@ -4,6 +4,7 @@ from incident_triage_mcp.adapters.jira_cloud import JiraCloudProvider
 from incident_triage_mcp.adapters.servicenow import ServiceNowProvider
 import os
 
+
 class JiraProvider(Protocol):
     def create_issue(self, payload: Dict[str, Any]) -> Dict[str, Any]: ...
     def validate(self) -> Dict[str, Any]: ...
@@ -12,10 +13,13 @@ class JiraProvider(Protocol):
     def add_comment(self, issue_key: str, body_md: str) -> Dict[str, Any]: ...
     def transition_issue(self, issue_key: str, transition_name: str) -> Dict[str, Any]: ...
 
+
 def provider_name() -> str:
     return (os.getenv("JIRA_PROVIDER", "mock") or "mock").lower()
 
+
 from incident_triage_mcp.adapters.jira_mock import JiraMockProvider
+
 
 def get_provider() -> JiraProvider:
     name = provider_name()

@@ -2,9 +2,10 @@ from __future__ import annotations
 from typing import Dict, Any
 import uuid
 
+
 class JiraMockProvider:
     def create_issue(self, payload: Dict[str, Any]) -> Dict[str, Any]:
-        key = f"{payload.get('project_key','INC')}-{str(uuid.uuid4())[:8].upper()}"
+        key = f"{payload.get('project_key', 'INC')}-{str(uuid.uuid4())[:8].upper()}"
         return {
             "created": True,
             "provider": "mock",
@@ -52,7 +53,17 @@ class JiraMockProvider:
     def list_issue_types(self, project_key: str) -> list[Dict[str, Any]]:
         _ = project_key
         return [
-            {"id": "1", "name": "Task", "description": "A task that needs to be done.", "subtask": False},
-            {"id": "2", "name": "Bug", "description": "A problem that impairs functionality.", "subtask": False},
+            {
+                "id": "1",
+                "name": "Task",
+                "description": "A task that needs to be done.",
+                "subtask": False,
+            },
+            {
+                "id": "2",
+                "name": "Bug",
+                "description": "A problem that impairs functionality.",
+                "subtask": False,
+            },
             {"id": "3", "name": "Story", "description": "A feature request.", "subtask": False},
         ]

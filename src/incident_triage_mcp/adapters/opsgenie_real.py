@@ -14,7 +14,9 @@ class OpsgenieAPI:
         self._secrets = secrets
 
     def _base_url(self) -> str:
-        raw = (self._secrets.get("OPSGENIE_BASE_URL", default="https://api.opsgenie.com") or "").strip()
+        raw = (
+            self._secrets.get("OPSGENIE_BASE_URL", default="https://api.opsgenie.com") or ""
+        ).strip()
         if not raw:
             raise RuntimeError("Opsgenie provider misconfigured: missing OPSGENIE_BASE_URL")
         if not raw.startswith(("http://", "https://")):
@@ -142,7 +144,9 @@ class OpsgenieAPI:
             if service_lookup and service_name.lower() not in service_lookup:
                 continue
 
-            started_at = self._parse_dt(alert.get("createdAt")) or self._parse_dt(alert.get("updatedAt"))
+            started_at = self._parse_dt(alert.get("createdAt")) or self._parse_dt(
+                alert.get("updatedAt")
+            )
             if started_at and started_at < cutoff:
                 continue
             started_at_iso = (started_at or cutoff).isoformat()

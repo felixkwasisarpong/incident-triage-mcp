@@ -27,6 +27,7 @@ def _ensure_mcp_stub() -> None:
         def tool(self):
             def decorator(fn):
                 return fn
+
             return decorator
 
         def run(self, transport: str = "stdio") -> None:
@@ -45,6 +46,7 @@ def _load_server():
     import incident_triage_mcp.policy.rbac as rbac
     import incident_triage_mcp.policy.safe_actions as safe_actions
     import incident_triage_mcp.server as server
+
     importlib.reload(rbac)
     importlib.reload(safe_actions)
     return importlib.reload(server)
