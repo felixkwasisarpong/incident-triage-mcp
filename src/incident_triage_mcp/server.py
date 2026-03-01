@@ -30,7 +30,11 @@ from incident_triage_mcp.adapters.teams_webhook import (
 from incident_triage_mcp.audit import AuditLog
 from incident_triage_mcp.config import ConfigError, load_config
 from incident_triage_mcp.domain_models import EvidenceBundle
-from incident_triage_mcp.policy.http_auth import HTTPAuthError, verify_api_key, verify_jwt_from_headers
+from incident_triage_mcp.policy.http_auth import (
+    HTTPAuthError,
+    verify_api_key,
+    verify_jwt_from_headers,
+)
 from incident_triage_mcp.policy.rbac import require_allowed, role
 from incident_triage_mcp.policy.safe_actions import SafeActionContext, enforce, SafeActionError
 from incident_triage_mcp.telemetry import ServiceTelemetry
@@ -656,11 +660,8 @@ def _jira_issue_type() -> str:
 
 def _notify_provider(provider: str | None = None) -> str:
     resolved = (
-        provider
-        or os.getenv("NOTIFY_PROVIDER")
-        or CFG.notify_provider
-        or "slack"
-    ).strip().lower()
+        (provider or os.getenv("NOTIFY_PROVIDER") or CFG.notify_provider or "slack").strip().lower()
+    )
     if resolved in {"slack", "teams"}:
         return resolved
     return "slack"
@@ -810,7 +811,9 @@ def incident_triage_run(
                 "provider": target,
             }
         result["notify"] = notify_result
-        notify_key = "teams" if str(notify_result.get("provider") or target).lower() == "teams" else "slack"
+        notify_key = (
+            "teams" if str(notify_result.get("provider") or target).lower() == "teams" else "slack"
+        )
         result[notify_key] = notify_result
 
     result["correlation_id"] = corr
@@ -819,7 +822,9 @@ def incident_triage_run(
 
 @mcp.tool()
 @_instrumented_tool("alerts_fetch_active")
-def alerts_fetch_active(services: list[str] = None, since_minutes: int = 30, max_alerts: int = 50) -> dict:
+def alerts_fetch_active(
+    services: list[str] = None, since_minutes: int = 30, max_alerts: int = 50
+) -> dict:
     meta, request_id = _tool_request_meta("alerts.fetch_active")
     services = services or []
     args = {"services": services, "since_minutes": since_minutes, "max_alerts": max_alerts}
@@ -858,7 +863,9 @@ def alerts_fetch_active(services: list[str] = None, since_minutes: int = 30, max
 def service_health_snapshot(service: str, start_iso: str, end_iso: str) -> dict:
     meta, request_id = _tool_request_meta("service.health_snapshot")
     args = {"service": service, "start_iso": start_iso, "end_iso": end_iso}
-    corr = audit.write("service.health_snapshot", args, ok=True, meta=meta, correlation_id=request_id)
+    corr = audit.write(
+        "service.health_snapshot", args, ok=True, meta=meta, correlation_id=request_id
+    )
 
     if CFG.bundle_only_mode:
         err = _observability_disabled_error("health_snapshot")
@@ -1037,6 +1044,7 @@ def slack_post_update(
     channel: str | None = None,
     dry_run: bool = True,
     text: str | None = None,
+    thread_ts: str | None = None,
 ) -> dict:
     """
     Post an incident update to Slack via Incoming Webhook.
@@ -1044,10 +1052,14 @@ def slack_post_update(
     """
     meta, request_id = _tool_request_meta("slack.post_update")
     resolved_channel = (channel or os.getenv("SLACK_DEFAULT_CHANNEL") or "").strip() or None
-    message = text or _build_slack_message(incident_id=incident_id, service=service, summary=summary, ticket=ticket)
+    message = text or _build_slack_message(
+        incident_id=incident_id, service=service, summary=summary, ticket=ticket
+    )
     payload = {"text": message}
     if resolved_channel:
         payload["channel"] = resolved_channel
+    if thread_ts:
+        payload["thread_ts"] = thread_ts
 
     corr = audit.write(
         "slack.post_update.request",
@@ -1055,6 +1067,7 @@ def slack_post_update(
             "incident_id": incident_id,
             "channel": resolved_channel,
             "dry_run": dry_run,
+            "thread_ts": thread_ts,
         },
         ok=True,
         meta=meta,
@@ -1099,11 +1112,18 @@ def slack_post_update(
     try:
         r = requests.post(webhook, json=payload, timeout=15)
         r.raise_for_status()
+        # Return thread_ts so callers can chain follow-up replies in the same thread.
+        response_ts = (
+            r.json().get("ts")
+            if r.headers.get("Content-Type", "").startswith("application/json")
+            else None
+        )
         return {
             "correlation_id": corr,
             "posted": True,
             "dry_run": False,
             "channel": resolved_channel,
+            "thread_ts": response_ts or thread_ts,
         }
     except Exception as e:
         audit.write("slack.post_update.error", {"correlation_id": corr, "error": str(e)}, ok=False)
@@ -1134,7 +1154,9 @@ def teams_post_update(
     """
     meta, request_id = _tool_request_meta("teams.post_update")
     resolved_channel = (channel or os.getenv("TEAMS_DEFAULT_CHANNEL") or "").strip() or None
-    message = text or _build_slack_message(incident_id=incident_id, service=service, summary=summary, ticket=ticket)
+    message = text or _build_slack_message(
+        incident_id=incident_id, service=service, summary=summary, ticket=ticket
+    )
     payload = build_teams_message_card(
         title=f"Incident Update {incident_id}",
         message=message,
@@ -1349,7 +1371,10 @@ def evidence_get_bundle(incident_id: str) -> dict:
         if fallback is None:
             fallback = out
 
-    fallback = fallback or {"found": False, "path": str(Path(_primary_evidence_dir()) / f"{incident_id}.json")}
+    fallback = fallback or {
+        "found": False,
+        "path": str(Path(_primary_evidence_dir()) / f"{incident_id}.json"),
+    }
     fallback["correlation_id"] = corr
     fallback["backend"] = backend
     return fallback
@@ -1357,11 +1382,17 @@ def evidence_get_bundle(incident_id: str) -> dict:
 
 @mcp.tool()
 @_instrumented_tool("evidence_wait_for_bundle")
-def evidence_wait_for_bundle(incident_id: str, timeout_seconds: int = 30, poll_seconds: int = 2) -> dict:
+def evidence_wait_for_bundle(
+    incident_id: str, timeout_seconds: int = 30, poll_seconds: int = 2
+) -> dict:
     meta, request_id = _tool_request_meta("evidence.wait_for_bundle")
     corr = audit.write(
         "evidence.wait_for_bundle",
-        {"incident_id": incident_id, "timeout_seconds": timeout_seconds, "poll_seconds": poll_seconds},
+        {
+            "incident_id": incident_id,
+            "timeout_seconds": timeout_seconds,
+            "poll_seconds": poll_seconds,
+        },
         ok=True,
         meta=meta,
         correlation_id=request_id,
@@ -1601,8 +1632,16 @@ def jira_create_ticket(
             )
         )
     except SafeActionError as e:
-        audit.write("jira.create_ticket.denied", {"correlation_id": corr, "error": str(e)}, ok=False)
-        return {"correlation_id": corr, "created": False, "dry_run": dry_run, "error": str(e), "draft": draft}
+        audit.write(
+            "jira.create_ticket.denied", {"correlation_id": corr, "error": str(e)}, ok=False
+        )
+        return {
+            "correlation_id": corr,
+            "created": False,
+            "dry_run": dry_run,
+            "error": str(e),
+            "draft": draft,
+        }
 
     if dry_run:
         return {"correlation_id": corr, "created": False, "dry_run": True, "draft": draft}
@@ -1637,7 +1676,9 @@ def jira_create_ticket(
         "jira.create_ticket.created",
         {
             "correlation_id": corr,
-            "result": {k: result.get(k) for k in ["created", "issue_key", "browse_url", "provider"]},
+            "result": {
+                k: result.get(k) for k in ["created", "issue_key", "browse_url", "provider"]
+            },
         },
         ok=True,
     )
@@ -1662,7 +1703,13 @@ def jira_list_projects() -> dict:
         return {"correlation_id": corr, "ok": True, "provider": provider, "projects": projects}
     except Exception as e:
         audit.write("jira.list_projects.error", {"error": str(e)}, ok=False)
-        return {"correlation_id": corr, "ok": False, "provider": provider, "projects": [], "error": str(e)}
+        return {
+            "correlation_id": corr,
+            "ok": False,
+            "provider": provider,
+            "projects": [],
+            "error": str(e),
+        }
 
 
 @mcp.tool()
@@ -1728,6 +1775,412 @@ def jira_validate_credentials() -> dict:
     except Exception as e:
         audit.write("jira.validate_credentials.error", {"error": str(e)}, ok=False)
         return {"correlation_id": corr, "ok": False, "error": str(e)}
+
+
+@mcp.tool()
+@_instrumented_tool("jira_add_comment")
+def jira_add_comment(
+    issue_key: str,
+    body_md: str,
+    dry_run: bool = True,
+    reason: str | None = None,
+    confirm_token: str | None = None,
+) -> dict:
+    """
+    Add a comment to an existing Jira/ServiceNow ticket.
+    Safe-by-default: dry_run=True returns the comment body without posting.
+    """
+    meta, request_id = _tool_request_meta("jira.add_comment")
+    corr = audit.write(
+        "jira.add_comment.request",
+        {"issue_key": issue_key, "dry_run": dry_run, "role": role(), "provider": provider_name()},
+        ok=True,
+        meta=meta,
+        correlation_id=request_id,
+    )
+
+    require_allowed("jira.add_comment")
+
+    try:
+        enforce(
+            SafeActionContext(
+                tool_name="jira.add_comment",
+                role=role(),
+                dry_run=dry_run,
+                reason=reason,
+                confirm_token=confirm_token,
+                idempotency_key=None,
+            )
+        )
+    except SafeActionError as e:
+        audit.write("jira.add_comment.denied", {"correlation_id": corr, "error": str(e)}, ok=False)
+        return {"correlation_id": corr, "added": False, "dry_run": dry_run, "error": str(e)}
+
+    if dry_run:
+        return {
+            "correlation_id": corr,
+            "added": False,
+            "dry_run": True,
+            "issue_key": issue_key,
+            "body_md": body_md,
+        }
+
+    try:
+        result = get_provider().add_comment(issue_key, body_md)
+        audit.write(
+            "jira.add_comment.added",
+            {
+                "correlation_id": corr,
+                "issue_key": issue_key,
+                "comment_id": result.get("comment_id"),
+            },
+            ok=True,
+        )
+        return {"correlation_id": corr, "dry_run": False, **result}
+    except Exception as e:
+        audit.write("jira.add_comment.error", {"correlation_id": corr, "error": str(e)}, ok=False)
+        return {"correlation_id": corr, "added": False, "dry_run": False, "error": str(e)}
+
+
+@mcp.tool()
+@_instrumented_tool("jira_transition_issue")
+def jira_transition_issue(
+    issue_key: str,
+    transition_name: str,
+    dry_run: bool = True,
+    reason: str | None = None,
+    confirm_token: str | None = None,
+) -> dict:
+    """
+    Transition an existing Jira/ServiceNow ticket to a new workflow state.
+    Safe-by-default: dry_run=True returns the intended transition without applying it.
+    Common transition_name values: 'In Progress', 'Resolved', 'Done', 'Closed'.
+    """
+    meta, request_id = _tool_request_meta("jira.transition_issue")
+    corr = audit.write(
+        "jira.transition_issue.request",
+        {
+            "issue_key": issue_key,
+            "transition_name": transition_name,
+            "dry_run": dry_run,
+            "provider": provider_name(),
+        },
+        ok=True,
+        meta=meta,
+        correlation_id=request_id,
+    )
+
+    require_allowed("jira.transition_issue")
+
+    try:
+        enforce(
+            SafeActionContext(
+                tool_name="jira.transition_issue",
+                role=role(),
+                dry_run=dry_run,
+                reason=reason,
+                confirm_token=confirm_token,
+                idempotency_key=None,
+            )
+        )
+    except SafeActionError as e:
+        audit.write(
+            "jira.transition_issue.denied", {"correlation_id": corr, "error": str(e)}, ok=False
+        )
+        return {"correlation_id": corr, "transitioned": False, "dry_run": dry_run, "error": str(e)}
+
+    if dry_run:
+        return {
+            "correlation_id": corr,
+            "transitioned": False,
+            "dry_run": True,
+            "issue_key": issue_key,
+            "transition_name": transition_name,
+        }
+
+    try:
+        result = get_provider().transition_issue(issue_key, transition_name)
+        audit.write(
+            "jira.transition_issue.transitioned",
+            {"correlation_id": corr, "issue_key": issue_key, "transition": transition_name},
+            ok=True,
+        )
+        return {"correlation_id": corr, "dry_run": False, **result}
+    except Exception as e:
+        audit.write(
+            "jira.transition_issue.error", {"correlation_id": corr, "error": str(e)}, ok=False
+        )
+        return {"correlation_id": corr, "transitioned": False, "dry_run": False, "error": str(e)}
+
+
+@mcp.tool()
+@_instrumented_tool("pd_acknowledge_alert")
+def pd_acknowledge_alert(
+    incident_id: str,
+    dry_run: bool = True,
+    reason: str | None = None,
+    confirm_token: str | None = None,
+) -> dict:
+    """
+    Acknowledge a PagerDuty incident via the PagerDuty REST API.
+    Safe-by-default: dry_run=True returns the intended action without sending.
+    Requires PAGERDUTY_API_TOKEN and PAGERDUTY_FROM_EMAIL env vars.
+    """
+    from incident_triage_mcp.adapters.pagerduty_real import PagerDutyAPI
+
+    meta, request_id = _tool_request_meta("pagerduty.acknowledge_alert")
+    corr = audit.write(
+        "pagerduty.acknowledge_alert.request",
+        {"incident_id": incident_id, "dry_run": dry_run, "role": role()},
+        ok=True,
+        meta=meta,
+        correlation_id=request_id,
+    )
+
+    require_allowed("pagerduty.acknowledge_alert")
+
+    try:
+        enforce(
+            SafeActionContext(
+                tool_name="pagerduty.acknowledge_alert",
+                role=role(),
+                dry_run=dry_run,
+                reason=reason,
+                confirm_token=confirm_token,
+                idempotency_key=None,
+            )
+        )
+    except SafeActionError as e:
+        audit.write(
+            "pagerduty.acknowledge_alert.denied",
+            {"correlation_id": corr, "error": str(e)},
+            ok=False,
+        )
+        return {"correlation_id": corr, "acknowledged": False, "dry_run": dry_run, "error": str(e)}
+
+    if dry_run:
+        return {
+            "correlation_id": corr,
+            "acknowledged": False,
+            "dry_run": True,
+            "incident_id": incident_id,
+        }
+
+    try:
+        secrets = get_secrets_loader()
+        api = PagerDutyAPI(secrets)
+        result = api.acknowledge_alert(incident_id)
+        audit.write(
+            "pagerduty.acknowledge_alert.acknowledged",
+            {"correlation_id": corr, "incident_id": incident_id},
+            ok=True,
+        )
+        return {"correlation_id": corr, "dry_run": False, **result}
+    except Exception as e:
+        audit.write(
+            "pagerduty.acknowledge_alert.error", {"correlation_id": corr, "error": str(e)}, ok=False
+        )
+        return {"correlation_id": corr, "acknowledged": False, "dry_run": False, "error": str(e)}
+
+
+@mcp.tool()
+@_instrumented_tool("pd_resolve_alert")
+def pd_resolve_alert(
+    incident_id: str,
+    dry_run: bool = True,
+    reason: str | None = None,
+    confirm_token: str | None = None,
+) -> dict:
+    """
+    Resolve a PagerDuty incident via the PagerDuty REST API.
+    Safe-by-default: dry_run=True returns the intended action without sending.
+    Requires PAGERDUTY_API_TOKEN and PAGERDUTY_FROM_EMAIL env vars.
+    """
+    from incident_triage_mcp.adapters.pagerduty_real import PagerDutyAPI
+
+    meta, request_id = _tool_request_meta("pagerduty.resolve_alert")
+    corr = audit.write(
+        "pagerduty.resolve_alert.request",
+        {"incident_id": incident_id, "dry_run": dry_run, "role": role()},
+        ok=True,
+        meta=meta,
+        correlation_id=request_id,
+    )
+
+    require_allowed("pagerduty.resolve_alert")
+
+    try:
+        enforce(
+            SafeActionContext(
+                tool_name="pagerduty.resolve_alert",
+                role=role(),
+                dry_run=dry_run,
+                reason=reason,
+                confirm_token=confirm_token,
+                idempotency_key=None,
+            )
+        )
+    except SafeActionError as e:
+        audit.write(
+            "pagerduty.resolve_alert.denied", {"correlation_id": corr, "error": str(e)}, ok=False
+        )
+        return {"correlation_id": corr, "resolved": False, "dry_run": dry_run, "error": str(e)}
+
+    if dry_run:
+        return {
+            "correlation_id": corr,
+            "resolved": False,
+            "dry_run": True,
+            "incident_id": incident_id,
+        }
+
+    try:
+        secrets = get_secrets_loader()
+        api = PagerDutyAPI(secrets)
+        result = api.resolve_alert(incident_id)
+        audit.write(
+            "pagerduty.resolve_alert.resolved",
+            {"correlation_id": corr, "incident_id": incident_id},
+            ok=True,
+        )
+        return {"correlation_id": corr, "dry_run": False, **result}
+    except Exception as e:
+        audit.write(
+            "pagerduty.resolve_alert.error", {"correlation_id": corr, "error": str(e)}, ok=False
+        )
+        return {"correlation_id": corr, "resolved": False, "dry_run": False, "error": str(e)}
+
+
+@mcp.tool()
+@_instrumented_tool("opsgenie_acknowledge_alert")
+def opsgenie_acknowledge_alert(
+    alert_id: str,
+    dry_run: bool = True,
+    reason: str | None = None,
+    confirm_token: str | None = None,
+) -> dict:
+    """
+    Acknowledge an OpsGenie alert via the OpsGenie REST API.
+    Safe-by-default: dry_run=True returns the intended action without sending.
+    Requires OPSGENIE_API_KEY env var.
+    """
+    from incident_triage_mcp.adapters.opsgenie_real import OpsgenieAPI
+
+    meta, request_id = _tool_request_meta("opsgenie.acknowledge_alert")
+    corr = audit.write(
+        "opsgenie.acknowledge_alert.request",
+        {"alert_id": alert_id, "dry_run": dry_run, "role": role()},
+        ok=True,
+        meta=meta,
+        correlation_id=request_id,
+    )
+
+    require_allowed("opsgenie.acknowledge_alert")
+
+    try:
+        enforce(
+            SafeActionContext(
+                tool_name="opsgenie.acknowledge_alert",
+                role=role(),
+                dry_run=dry_run,
+                reason=reason,
+                confirm_token=confirm_token,
+                idempotency_key=None,
+            )
+        )
+    except SafeActionError as e:
+        audit.write(
+            "opsgenie.acknowledge_alert.denied", {"correlation_id": corr, "error": str(e)}, ok=False
+        )
+        return {"correlation_id": corr, "acknowledged": False, "dry_run": dry_run, "error": str(e)}
+
+    if dry_run:
+        return {
+            "correlation_id": corr,
+            "acknowledged": False,
+            "dry_run": True,
+            "alert_id": alert_id,
+        }
+
+    try:
+        secrets = get_secrets_loader()
+        api = OpsgenieAPI(secrets)
+        result = api.acknowledge_alert(alert_id)
+        audit.write(
+            "opsgenie.acknowledge_alert.acknowledged",
+            {"correlation_id": corr, "alert_id": alert_id},
+            ok=True,
+        )
+        return {"correlation_id": corr, "dry_run": False, **result}
+    except Exception as e:
+        audit.write(
+            "opsgenie.acknowledge_alert.error", {"correlation_id": corr, "error": str(e)}, ok=False
+        )
+        return {"correlation_id": corr, "acknowledged": False, "dry_run": False, "error": str(e)}
+
+
+@mcp.tool()
+@_instrumented_tool("opsgenie_close_alert")
+def opsgenie_close_alert(
+    alert_id: str,
+    note: str = "",
+    dry_run: bool = True,
+    reason: str | None = None,
+    confirm_token: str | None = None,
+) -> dict:
+    """
+    Close an OpsGenie alert via the OpsGenie REST API.
+    Safe-by-default: dry_run=True returns the intended action without sending.
+    Requires OPSGENIE_API_KEY env var.
+    """
+    from incident_triage_mcp.adapters.opsgenie_real import OpsgenieAPI
+
+    meta, request_id = _tool_request_meta("opsgenie.close_alert")
+    corr = audit.write(
+        "opsgenie.close_alert.request",
+        {"alert_id": alert_id, "dry_run": dry_run, "role": role()},
+        ok=True,
+        meta=meta,
+        correlation_id=request_id,
+    )
+
+    require_allowed("opsgenie.close_alert")
+
+    try:
+        enforce(
+            SafeActionContext(
+                tool_name="opsgenie.close_alert",
+                role=role(),
+                dry_run=dry_run,
+                reason=reason,
+                confirm_token=confirm_token,
+                idempotency_key=None,
+            )
+        )
+    except SafeActionError as e:
+        audit.write(
+            "opsgenie.close_alert.denied", {"correlation_id": corr, "error": str(e)}, ok=False
+        )
+        return {"correlation_id": corr, "closed": False, "dry_run": dry_run, "error": str(e)}
+
+    if dry_run:
+        return {"correlation_id": corr, "closed": False, "dry_run": True, "alert_id": alert_id}
+
+    try:
+        secrets = get_secrets_loader()
+        api = OpsgenieAPI(secrets)
+        result = api.close_alert(alert_id, note=note)
+        audit.write(
+            "opsgenie.close_alert.closed",
+            {"correlation_id": corr, "alert_id": alert_id},
+            ok=True,
+        )
+        return {"correlation_id": corr, "dry_run": False, **result}
+    except Exception as e:
+        audit.write(
+            "opsgenie.close_alert.error", {"correlation_id": corr, "error": str(e)}, ok=False
+        )
+        return {"correlation_id": corr, "closed": False, "dry_run": False, "error": str(e)}
 
 
 if _workflow_backend() == "airflow":

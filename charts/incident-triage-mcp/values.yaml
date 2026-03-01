@@ -8,6 +8,16 @@ image:
 nameOverride: ""
 fullnameOverride: ""
 
+# ServiceAccount created for the MCP server pods.
+# Set annotations for cloud-provider workload identity (IRSA, Workload Identity, etc.).
+serviceAccount:
+  create: true
+  name: ""
+  annotations: {}
+  # Example for AWS IRSA:
+  # annotations:
+  #   eks.amazonaws.com/role-arn: arn:aws:iam::123456789012:role/incident-triage-mcp
+
 containerPort: 3333
 
 service:
@@ -17,6 +27,25 @@ service:
 
 podAnnotations: {}
 podLabels: {}
+
+# HTTP liveness and readiness probes.
+# The MCP server exposes /health and /ready on containerPort.
+# Set to {} to disable a probe.
+livenessProbe:
+  httpGet:
+    path: /health
+    port: 3333
+  initialDelaySeconds: 10
+  periodSeconds: 15
+  failureThreshold: 3
+
+readinessProbe:
+  httpGet:
+    path: /ready
+    port: 3333
+  initialDelaySeconds: 5
+  periodSeconds: 10
+  failureThreshold: 3
 
 resources: {}
 
@@ -32,6 +61,40 @@ env:
   MCP_HOST: 0.0.0.0
   MCP_PORT: "3333"
   AUDIT_MODE: stdout
+
+# ConfigMap for non-secret environment variables (observability providers, feature flags, etc.).
+# All keys are injected into the container as env vars via envFrom.
+configMap:
+  enabled: false
+  data: {}
+  # Example:
+  # data:
+  #   METRICS_PROVIDER: prometheus
+  #   ALERT_PROVIDER: pagerduty
+  #   LOGS_PROVIDER: elk
+  #   AUDIT_MODE: stdout
+
+# Ingress to expose the MCP server outside the cluster.
+# Disabled by default — enable and configure for your ingress controller.
+ingress:
+  enabled: false
+  className: ""
+  annotations: {}
+  # Example for nginx-ingress with TLS:
+  # annotations:
+  #   kubernetes.io/ingress.class: nginx
+  #   cert-manager.io/cluster-issuer: letsencrypt-prod
+  hosts:
+    - host: incident-triage-mcp.example.com
+      paths:
+        - path: /
+          pathType: Prefix
+  tls: []
+  # Example:
+  # tls:
+  #   - secretName: incident-triage-mcp-tls
+  #     hosts:
+  #       - incident-triage-mcp.example.com
 
 # Plaintext secrets for quickstart only.
 # Use external secret management in production.

@@ -14,7 +14,9 @@ class OpsgenieAPI:
         self._secrets = secrets
 
     def _base_url(self) -> str:
-        raw = (self._secrets.get("OPSGENIE_BASE_URL", default="https://api.opsgenie.com") or "").strip()
+        raw = (
+            self._secrets.get("OPSGENIE_BASE_URL", default="https://api.opsgenie.com") or ""
+        ).strip()
         if not raw:
             raise RuntimeError("Opsgenie provider misconfigured: missing OPSGENIE_BASE_URL")
         if not raw.startswith(("http://", "https://")):
@@ -142,7 +144,9 @@ class OpsgenieAPI:
             if service_lookup and service_name.lower() not in service_lookup:
                 continue
 
-            started_at = self._parse_dt(alert.get("createdAt")) or self._parse_dt(alert.get("updatedAt"))
+            started_at = self._parse_dt(alert.get("createdAt")) or self._parse_dt(
+                alert.get("updatedAt")
+            )
             if started_at and started_at < cutoff:
                 continue
             started_at_iso = (started_at or cutoff).isoformat()
@@ -172,6 +176,39 @@ class OpsgenieAPI:
                 break
 
         return out
+
+    def acknowledge_alert(self, alert_id: str) -> dict[str, Any]:
+        response = requests.post(
+            f"{self._base_url()}/v2/alerts/{alert_id}/acknowledge",
+            headers=self._headers(),
+            json={"note": "Acknowledged via incident-triage-mcp"},
+            timeout=self._timeout_seconds(),
+        )
+        response.raise_for_status()
+        data = response.json() if response.content else {}
+        return {
+            "acknowledged": True,
+            "alert_id": alert_id,
+            "request_id": data.get("requestId"),
+        }
+
+    def close_alert(self, alert_id: str, note: str = "") -> dict[str, Any]:
+        body: dict[str, Any] = {}
+        if note:
+            body["note"] = note
+        response = requests.post(
+            f"{self._base_url()}/v2/alerts/{alert_id}/close",
+            headers=self._headers(),
+            json=body,
+            timeout=self._timeout_seconds(),
+        )
+        response.raise_for_status()
+        data = response.json() if response.content else {}
+        return {
+            "closed": True,
+            "alert_id": alert_id,
+            "request_id": data.get("requestId"),
+        }
 
     def health_snapshot(self, service: str, start_iso: str, end_iso: str) -> dict[str, Any]:
         raise RuntimeError(

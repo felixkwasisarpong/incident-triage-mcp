@@ -2,6 +2,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: incident-triage-mcp
+  namespace: incident-triage
 spec:
   replicas: 1
   selector:
@@ -16,7 +17,6 @@ spec:
         - name: mcp
           image: incident-triage-mcp:0.1.0
           imagePullPolicy: IfNotPresent
-          imagePullPolicy: IfNotPresent
           ports:
             - containerPort: 3333
           env:
@@ -30,34 +30,51 @@ spec:
               value: "3333"
             - name: AUDIT_MODE
               value: "stdout"
+            # Airflow in-cluster service URL (incident-triage namespace).
+            # For local docker-compose testing use http://host.docker.internal:8080 instead.
             - name: AIRFLOW_BASE_URL
-              value: "http://host.docker.internal:8080"
+              value: "http://airflow-api-server.incident-triage.svc.cluster.local:8080"
             - name: AIRFLOW_USERNAME
-              value: "admin"
+              valueFrom:
+                secretKeyRef:
+                  name: airflow-creds
+                  key: username
             - name: AIRFLOW_PASSWORD
-              value: "admin"
+              valueFrom:
+                secretKeyRef:
+                  name: airflow-creds
+                  key: password
 
             - name: ARTIFACT_STORE
               value: "s3"
             - name: S3_ENDPOINT_URL
-              value: "http://host.docker.internal:9000"
+              value: "http://minio.incident-triage.svc.cluster.local:9000"
             - name: S3_BUCKET
               value: "triage-artifacts"
             - name: S3_REGION
               value: "us-east-1"
             - name: AWS_ACCESS_KEY_ID
-              value: "minioadmin"
+              valueFrom:
+                secretKeyRef:
+                  name: minio-creds
+                  key: access_key_id
             - name: AWS_SECRET_ACCESS_KEY
-              value: "minioadmin"
-
+              valueFrom:
+                secretKeyRef:
+                  name: minio-creds
+                  key: secret_access_key
 
           readinessProbe:
-            tcpSocket:
+            httpGet:
+              path: /ready
               port: 3333
-            initialDelaySeconds: 3
-            periodSeconds: 5
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            failureThreshold: 3
           livenessProbe:
-            tcpSocket:
+            httpGet:
+              path: /health
               port: 3333
             initialDelaySeconds: 10
-            periodSeconds: 10
+            periodSeconds: 15
+            failureThreshold: 3

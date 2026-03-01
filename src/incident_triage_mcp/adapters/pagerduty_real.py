@@ -14,7 +14,9 @@ class PagerDutyAPI:
         self._secrets = secrets
 
     def _base_url(self) -> str:
-        raw = (self._secrets.get("PAGERDUTY_BASE_URL", default="https://api.pagerduty.com") or "").strip()
+        raw = (
+            self._secrets.get("PAGERDUTY_BASE_URL", default="https://api.pagerduty.com") or ""
+        ).strip()
         if not raw:
             raise RuntimeError("PagerDuty provider misconfigured: missing PAGERDUTY_BASE_URL")
         if not raw.startswith(("http://", "https://")):
@@ -131,7 +133,9 @@ class PagerDutyAPI:
             if service_lookup and service_name.lower() not in service_lookup:
                 continue
 
-            started_at = self._parse_dt(incident.get("created_at")) or self._parse_dt(incident.get("last_status_change_at"))
+            started_at = self._parse_dt(incident.get("created_at")) or self._parse_dt(
+                incident.get("last_status_change_at")
+            )
             if started_at and started_at < cutoff:
                 continue
             started_at_iso = (started_at or cutoff).isoformat()
@@ -164,6 +168,37 @@ class PagerDutyAPI:
                 break
 
         return out
+
+    def _from_email(self) -> str:
+        email = (self._secrets.get("PAGERDUTY_FROM_EMAIL") or "").strip()
+        if not email:
+            raise RuntimeError(
+                "PagerDuty write-back requires PAGERDUTY_FROM_EMAIL "
+                "(the email of the API token owner)."
+            )
+        return email
+
+    def acknowledge_alert(self, incident_id: str) -> dict[str, Any]:
+        headers = {**self._headers(), "From": self._from_email()}
+        response = requests.put(
+            f"{self._base_url()}/incidents/{incident_id}",
+            headers=headers,
+            json={"incident": {"type": "incident_reference", "status": "acknowledged"}},
+            timeout=self._timeout_seconds(),
+        )
+        response.raise_for_status()
+        return {"acknowledged": True, "incident_id": incident_id}
+
+    def resolve_alert(self, incident_id: str) -> dict[str, Any]:
+        headers = {**self._headers(), "From": self._from_email()}
+        response = requests.put(
+            f"{self._base_url()}/incidents/{incident_id}",
+            headers=headers,
+            json={"incident": {"type": "incident_reference", "status": "resolved"}},
+            timeout=self._timeout_seconds(),
+        )
+        response.raise_for_status()
+        return {"resolved": True, "incident_id": incident_id}
 
     def health_snapshot(self, service: str, start_iso: str, end_iso: str) -> dict[str, Any]:
         raise RuntimeError(

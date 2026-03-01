@@ -21,9 +21,7 @@ class ServiceNowProvider:
         if not self.password:
             missing.append("SERVICENOW_PASSWORD")
         if missing:
-            raise RuntimeError(
-                "ServiceNow provider requires " + ", ".join(missing)
-            )
+            raise RuntimeError("ServiceNow provider requires " + ", ".join(missing))
 
     def _url(self, path: str) -> str:
         return f"{self.base_url}{path}"
@@ -77,9 +75,7 @@ class ServiceNowProvider:
         sys_id = str(result.get("sys_id") or "").strip()
         issue_key = number or sys_id or None
         browse_url = (
-            self._url(f"/nav_to.do?uri={self.table}.do?sys_id={sys_id}")
-            if sys_id
-            else None
+            self._url(f"/nav_to.do?uri={self.table}.do?sys_id={sys_id}") if sys_id else None
         )
         return {
             "created": True,
@@ -88,6 +84,52 @@ class ServiceNowProvider:
             "browse_url": browse_url,
             "sys_id": sys_id or None,
             "number": number or None,
+        }
+
+    def add_comment(self, issue_key: str, body_md: str) -> Dict[str, Any]:
+        # In ServiceNow, issue_key is treated as sys_id.
+        response = requests.patch(
+            self._url(f"/api/now/table/{self.table}/{issue_key}"),
+            auth=self._auth(),
+            headers={"Accept": "application/json", "Content-Type": "application/json"},
+            json={"work_notes": body_md},
+            timeout=20,
+        )
+        response.raise_for_status()
+        return {
+            "added": True,
+            "issue_key": issue_key,
+            "comment_id": None,
+        }
+
+    def transition_issue(self, issue_key: str, transition_name: str) -> Dict[str, Any]:
+        # Map common human-readable transition names to ServiceNow state codes.
+        state_map: dict[str, str] = {
+            "new": "1",
+            "in progress": "2",
+            "on hold": "3",
+            "resolved": "6",
+            "closed": "7",
+            "cancelled": "8",
+        }
+        state_code = state_map.get(transition_name.strip().lower())
+        if state_code is None:
+            raise RuntimeError(
+                f"Unknown transition '{transition_name}' for ServiceNow. "
+                f"Valid names: {list(state_map.keys())}"
+            )
+        response = requests.patch(
+            self._url(f"/api/now/table/{self.table}/{issue_key}"),
+            auth=self._auth(),
+            headers={"Accept": "application/json", "Content-Type": "application/json"},
+            json={"state": state_code},
+            timeout=20,
+        )
+        response.raise_for_status()
+        return {
+            "transitioned": True,
+            "issue_key": issue_key,
+            "transition": transition_name,
         }
 
     def validate(self) -> Dict[str, Any]:
