@@ -136,6 +136,36 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
+  dco:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Check DCO sign-off
+        run: |
+          BASE="${{ github.event.pull_request.base.sha }}"
+          HEAD="${{ github.event.pull_request.head.sha }}"
+          MISSING=""
+          while IFS= read -r sha; do
+            msg=$(git log --format=%B -n 1 "$sha")
+            if ! echo "$msg" | grep -qiE "^Signed-off-by: .+ <.+@.+>"; then
+              MISSING="$MISSING\n  $sha"
+            fi
+          done < <(git log --format=%H "$BASE..$HEAD")
+          if [ -n "$MISSING" ]; then
+            echo "ERROR: The following commits are missing a 'Signed-off-by:' trailer:"
+            echo -e "$MISSING"
+            echo ""
+            echo "Please amend them with: git commit --amend --signoff"
+            echo "Or sign-off future commits with: git commit -s"
+            exit 1
+          fi
+          echo "All commits have a DCO sign-off."
+
   dependency-review:
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
