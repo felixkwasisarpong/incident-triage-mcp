@@ -10,7 +10,18 @@ ROLE = os.getenv("MCP_ROLE", "viewer").lower()
 ROLE_ALLOW = {
     "viewer": set(),
     "triager": {"jira.draft_ticket"},
-    "responder": {"jira.draft_ticket", "jira.create_ticket", "slack.post_update", "teams.post_update"},
+    "responder": {
+        "jira.draft_ticket",
+        "jira.create_ticket",
+        "jira.add_comment",
+        "jira.transition_issue",
+        "slack.post_update",
+        "teams.post_update",
+        "pagerduty.acknowledge_alert",
+        "pagerduty.resolve_alert",
+        "opsgenie.acknowledge_alert",
+        "opsgenie.close_alert",
+    },
     "admin": {"*"},
 }
 

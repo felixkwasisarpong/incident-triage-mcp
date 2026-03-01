@@ -13,6 +13,21 @@ class JiraMockProvider:
             "payload": payload,
         }
 
+    def add_comment(self, issue_key: str, body_md: str) -> Dict[str, Any]:
+        _ = body_md
+        return {
+            "added": True,
+            "issue_key": issue_key,
+            "comment_id": "mock-comment-1",
+        }
+
+    def transition_issue(self, issue_key: str, transition_name: str) -> Dict[str, Any]:
+        return {
+            "transitioned": True,
+            "issue_key": issue_key,
+            "transition": transition_name,
+        }
+
     def validate(self) -> Dict[str, Any]:
         return {"accountId": "mock-account", "displayName": "Mock Jira User"}
 

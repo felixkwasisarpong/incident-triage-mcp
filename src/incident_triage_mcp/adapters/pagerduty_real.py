@@ -165,6 +165,37 @@ class PagerDutyAPI:
 
         return out
 
+    def _from_email(self) -> str:
+        email = (self._secrets.get("PAGERDUTY_FROM_EMAIL") or "").strip()
+        if not email:
+            raise RuntimeError(
+                "PagerDuty write-back requires PAGERDUTY_FROM_EMAIL "
+                "(the email of the API token owner)."
+            )
+        return email
+
+    def acknowledge_alert(self, incident_id: str) -> dict[str, Any]:
+        headers = {**self._headers(), "From": self._from_email()}
+        response = requests.put(
+            f"{self._base_url()}/incidents/{incident_id}",
+            headers=headers,
+            json={"incident": {"type": "incident_reference", "status": "acknowledged"}},
+            timeout=self._timeout_seconds(),
+        )
+        response.raise_for_status()
+        return {"acknowledged": True, "incident_id": incident_id}
+
+    def resolve_alert(self, incident_id: str) -> dict[str, Any]:
+        headers = {**self._headers(), "From": self._from_email()}
+        response = requests.put(
+            f"{self._base_url()}/incidents/{incident_id}",
+            headers=headers,
+            json={"incident": {"type": "incident_reference", "status": "resolved"}},
+            timeout=self._timeout_seconds(),
+        )
+        response.raise_for_status()
+        return {"resolved": True, "incident_id": incident_id}
+
     def health_snapshot(self, service: str, start_iso: str, end_iso: str) -> dict[str, Any]:
         raise RuntimeError(
             "PagerDuty adapter does not implement health_snapshot. "

@@ -155,6 +155,51 @@ class JiraCloudProvider:
 
         return out
 
+    def add_comment(self, issue_key: str, body_md: str) -> Dict[str, Any]:
+        url = self.base_url.rstrip("/") + f"/rest/api/3/issue/{issue_key}/comment"
+        auth = (self.email, self.api_token)
+        body = _markdown_to_adf(body_md)
+        r = requests.post(url, json={"body": body}, auth=auth, timeout=20)
+        r.raise_for_status()
+        data = r.json()
+        return {
+            "added": True,
+            "issue_key": issue_key,
+            "comment_id": data.get("id"),
+        }
+
+    def transition_issue(self, issue_key: str, transition_name: str) -> Dict[str, Any]:
+        auth = (self.email, self.api_token)
+        transitions_url = self.base_url.rstrip("/") + f"/rest/api/3/issue/{issue_key}/transitions"
+
+        r = requests.get(transitions_url, auth=auth, timeout=20)
+        r.raise_for_status()
+        transitions = r.json().get("transitions") or []
+
+        match = next(
+            (t for t in transitions if t.get("name", "").lower() == transition_name.lower()),
+            None,
+        )
+        if match is None:
+            available = [t.get("name") for t in transitions]
+            raise RuntimeError(
+                f"Transition '{transition_name}' not found for {issue_key}. "
+                f"Available: {available}"
+            )
+
+        r = requests.post(
+            transitions_url,
+            json={"transition": {"id": match["id"]}},
+            auth=auth,
+            timeout=20,
+        )
+        r.raise_for_status()
+        return {
+            "transitioned": True,
+            "issue_key": issue_key,
+            "transition": transition_name,
+        }
+
     def list_issue_types(self, project_key: str) -> list[Dict[str, Any]]:
         auth = (self.email, self.api_token)
         issue_types: list[Dict[str, Any]] = []

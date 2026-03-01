@@ -173,6 +173,39 @@ class OpsgenieAPI:
 
         return out
 
+    def acknowledge_alert(self, alert_id: str) -> dict[str, Any]:
+        response = requests.post(
+            f"{self._base_url()}/v2/alerts/{alert_id}/acknowledge",
+            headers=self._headers(),
+            json={"note": "Acknowledged via incident-triage-mcp"},
+            timeout=self._timeout_seconds(),
+        )
+        response.raise_for_status()
+        data = response.json() if response.content else {}
+        return {
+            "acknowledged": True,
+            "alert_id": alert_id,
+            "request_id": data.get("requestId"),
+        }
+
+    def close_alert(self, alert_id: str, note: str = "") -> dict[str, Any]:
+        body: dict[str, Any] = {}
+        if note:
+            body["note"] = note
+        response = requests.post(
+            f"{self._base_url()}/v2/alerts/{alert_id}/close",
+            headers=self._headers(),
+            json=body,
+            timeout=self._timeout_seconds(),
+        )
+        response.raise_for_status()
+        data = response.json() if response.content else {}
+        return {
+            "closed": True,
+            "alert_id": alert_id,
+            "request_id": data.get("requestId"),
+        }
+
     def health_snapshot(self, service: str, start_iso: str, end_iso: str) -> dict[str, Any]:
         raise RuntimeError(
             "Opsgenie adapter does not implement health_snapshot. "
