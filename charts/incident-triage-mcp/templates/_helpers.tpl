@@ -36,3 +36,11 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 {{- $svcPort := .Values.service.port | toString -}}
 {{- printf "http://%s.%s.svc.cluster.local:%s/mcp" (include "incident-triage-mcp.fullname" .) .Release.Namespace $svcPort -}}
 {{- end -}}
+
+{{- define "incident-triage-mcp.serviceAccountName" -}}
+{{- if .Values.serviceAccount.create -}}
+{{- default (include "incident-triage-mcp.fullname" .) .Values.serviceAccount.name -}}
+{{- else -}}
+{{- default "default" .Values.serviceAccount.name -}}
+{{- end -}}
+{{- end -}}

@@ -1,0 +1,12 @@
+# airflow-artifacts-pvc.yaml
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: airflow-artifacts-pvc
+  namespace: incident-triage
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 1Gi

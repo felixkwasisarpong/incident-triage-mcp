@@ -1,0 +1,53 @@
+image:
+  repository: incident-triage-mcp
+  tag: "dev"
+  pullPolicy: IfNotPresent
+
+env:
+  DEPLOYMENT_PROFILE: staging
+  MCP_TRANSPORT: streamable-http
+  MCP_HOST: 0.0.0.0
+  MCP_PORT: "3333"
+  AUDIT_MODE: stdout
+  MCP_HTTP_AUTH_MODE: api_key
+  BUNDLE_ONLY_MODE: "true"
+
+  EVIDENCE_BACKEND: airflow
+  AIRFLOW_BASE_URL: "http://airflow-api-server.incident-triage.svc.cluster.local:8080"
+  AIRFLOW_API_VERSION: "v2"
+  AIRFLOW_AUTH_MODE: "token"
+  AIRFLOW_ARTIFACT_DIR: "/shared/artifacts"
+
+  MCP_ROLE: responder
+  JIRA_PROVIDER: mock
+  JIRA_PROJECT_KEY: INC
+  JIRA_ISSUE_TYPE: Task
+
+secretEnv:
+  MCP_HTTP_API_KEY: "change-me"
+  CONFIRM_TOKEN: "start-up-123"
+  AIRFLOW_USERNAME: "admin"
+  AIRFLOW_PASSWORD: "admin"
+
+extraVolumeMounts:
+  - name: airflow-artifacts
+    mountPath: /shared/artifacts
+    readOnly: true
+
+extraVolumes:
+  - name: airflow-artifacts
+    persistentVolumeClaim:
+      claimName: airflow-artifacts-pvc
+
+agentJob:
+  enabled: true
+  incidentId: "INC-123"
+  service: "payments-api"
+  includeTicket: true
+  compact: true
+  secretEnv:
+    MCP_HTTP_API_KEY: "change-me"
+  image:
+    repository: incident-triage-mcp
+    tag: "dev"
+    pullPolicy: IfNotPresent
